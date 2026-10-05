@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "cyancodex",
+  "version": "${version}",
+  "name": "CyanCodex 沧蓝工坊指令助手",
+  "description": "《我的世界》指令助手：指令库、T显/计分板、穷举、滚动字幕、音乐生成器与 AI 助手，全部在游戏内一键取用。",
+  "authors": ["沧蓝工坊"],
+  "contact": {
+    "homepage": "https://cyancodex.cn",
+    "sources": "https://github.com/Diamond-Minec/CyanCodex-Android"
+  },
+  "license": "GPL-3.0",
+  "icon": "assets/cyancodex/icon.png",
+  "environment": "client",
+  "entrypoints": {
+    "client": ["top.blueworkshop.cyancodex.CyanCodexClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.15.0",
+    "minecraft": "${mc}",
+    "java": ">=17",
+    "fabric-api": "*"
+  }
+}

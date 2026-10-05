@@ -1,0 +1,49 @@
+# ===== 构建产物 =====
+build/
+*/build/
+.gradle/
+.kotlin/
+.cxx/
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# ===== 签名与本地配置（绝不能进仓库）=====
+*.keystore
+*.jks
+keystore.properties
+signing.properties
+local.properties
+
+# ===== IDE =====
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.vs/
+
+# ===== 系统 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== 语言运行时 =====
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+dist/
+.cache/
+
+# ===== 临时 / 调试 =====
+*.log
+*.hprof
+*.orig
+*.rej
+*.tmp
+*.bak
+*.swp
+*~

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 悬浮球背景: 白色圆 + 绿色边框 (显示 App 图标) -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="#FFFFFF" />
+    <stroke
+        android:width="2dp"
+        android:color="#4ADE80" />
+</shape>

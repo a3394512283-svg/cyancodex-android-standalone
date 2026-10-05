@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0B1512">
+<meta name="description" content="CyanCodex 开放 API 与开发者平台：生成器全功能接口、API 文档、在线调试、插件开发教学。">
+<!-- OG:START 微信/社交平台分享卡片(由 .deploy/og/inject_og.py 生成, 勿手改) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CyanCodex 沧蓝工坊">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:title" content="CyanCodex 开发者平台 · 开放 API">
+<meta property="og:description" content="生成器全功能接口、API 文档、在线调试与插件开发教学，支持 X-API-Key 鉴权与调用量统计。">
+<meta property="og:url" content="https://app.blueworkshop.top/dev/">
+<meta property="og:image" content="https://cyancodex.cn/assets/og-dev.png">
+<meta property="og:image:width" content="478">
+<meta property="og:image:height" content="478">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="CyanCodex 开发者平台 · 开放 API">
+<!-- OG:END -->
+<title>CyanCodex 开发者平台 · 开放 API</title>
+<link rel="icon" href="/icon-round.png">
+<link rel="stylesheet" href="/dev/dev.css">
+</head>
+<body>
+<div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div>
+
+<header class="topbar">
+  <a class="brand" href="#/home">
+    <span class="logo">C</span>
+    <span class="brand-text"><b>CyanCodex</b><i>开发者平台 · 开放 API</i></span>
+  </a>
+  <nav class="topnav">
+    <a href="#/docs">API 文档</a>
+    <a href="#/play">在线调试</a>
+    <a href="#/plugin">插件开发</a>
+    <a href="/">返回网页版</a>
+    <span id="who" class="who"></span>
+  </nav>
+</header>
+
+<div class="wrap">
+  <!-- ===================== 首页 / 登录 ===================== -->
+  <section id="pg-home" class="page">
+    <div class="hero">
+      <h1>把沧蓝工坊的生成器<br>接进你自己的程序</h1>
+      <p class="sub">开放 API 覆盖 App 内全部生成器：T显/计分板、穷举、滚动字幕、音乐、T显 JSON。用沧蓝工坊账号登录后即可创建密钥，免费额度每日 2000 次调用。</p>
+      <div class="hero-actions">
+        <a class="btn primary" href="#/login">登录 / 创建密钥</a>
+        <a class="btn" href="#/docs">查看接口文档</a>
+      </div>
+      <div class="cards3">
+        <div class="card glass"><h3>同一套算法</h3><p>服务端与 App 使用同一套生成逻辑，输出指令完全一致（基岩版 Bedrock）。</p></div>
+        <div class="card glass"><h3>三重校验登录</h3><p>软件账号密码 + 图形验证码 + 邮箱验证码 + App 站内信验证码，密钥不会被人顶走。</p></div>
+        <div class="card glass"><h3>文档 + 调试</h3><p>接口参数表、在线调试台、Java 插件开发教学，一处看全。</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 登录 (三因子) ===================== -->
+  <section id="pg-login" class="page">
+    <div class="auth glass">
+      <h2>开发者平台登录</h2>
+      <p class="hint">必须使用沧蓝工坊 App 的账号。登录需要同时通过：图形验证码 → 邮箱验证码 → App 站内信验证码。</p>
+
+      <!-- 本地直登 (仅在本机 127.0.0.1 打开时显示) -->
+      <div id="login-local" style="display:none">
+        <div class="notice" id="ll-notice">本地运行模式：可用内置测试账号直接登录（仅本机 127.0.0.1 有效，跳过邮箱与站内信验证码）。</div>
+        <label>本地测试账号</label>
+        <input id="ll-account" placeholder="账号" autocomplete="username">
+        <label>密码</label>
+        <input id="ll-pass" type="password" placeholder="密码" autocomplete="current-password">
+        <button class="btn primary block" id="ll-login">本地直接登录</button>
+        <p class="msg err" id="ll-err"></p>
+        <p class="hint"><a href="#" id="ll-toggle">改用正式三重验证登录（图形 + 邮箱 + 站内信）</a></p>
+      </div>
+
+      <div id="login-formal">
+      <div id="login-step1">
+        <label>沧蓝工坊账号（用户名或邮箱）</label>
+        <input id="lg-account" placeholder="用户名 / 邮箱" autocomplete="username">
+        <label>密码</label>
+        <input id="lg-pass" type="password" placeholder="软件登录密码" autocomplete="current-password">
+        <label>图形验证码</label>
+        <div class="cap-row">
+          <input id="lg-cap" placeholder="输入图中字符" maxlength="6">
+          <img id="lg-cap-img" alt="验证码" title="点击刷新" src="">
+        </div>
+        <button class="btn primary block" id="lg-next">下一步</button>
+        <p class="msg err" id="lg-err1"></p>
+      </div>
+
+      <div id="login-step2" style="display:none">
+        <div class="notice">
+          邮箱验证码已发送到 <b id="lg-email"></b>；<b>软件内验证码</b>请打开 App →「消息」查看同名站内信。
+        </div>
+        <label>邮箱验证码</label>
+        <input id="lg-emailcode" placeholder="6 位数字" maxlength="6" inputmode="numeric">
+        <label>软件内（站内信）验证码</label>
+        <input id="lg-appcode" placeholder="6 位数字" maxlength="6" inputmode="numeric">
+        <button class="btn primary block" id="lg-verify">登录开发者平台</button>
+        <button class="btn block" id="lg-resend">重新发送验证码</button>
+        <p class="msg err" id="lg-err2"></p>
+        <p class="msg" id="lg-tip2"></p>
+      </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== 控制台 ===================== -->
+  <section id="pg-dash" class="page">
+    <h2 class="ptitle">控制台</h2>
+    <div id="dash-body" class="grid2"></div>
+  </section>
+
+  <section id="pg-keys" class="page">
+    <h2 class="ptitle">API 密钥</h2>
+    <div class="toolbar">
+      <button class="btn primary" id="key-new">新建密钥</button>
+      <span class="hint" id="key-hint"></span>
+    </div>
+    <div id="key-newbox" class="newkey glass" style="display:none">
+      <label>密钥名称（区分用途，如「服务器插件」「班级工具」）</label>
+      <input id="key-name" placeholder="例如：服务器公告系统">
+      <button class="btn primary" id="key-create">生成密钥</button>
+      <div id="key-result" class="keyresult" style="display:none">
+        <p class="warn">密钥只显示这一次，请立即复制保存：</p>
+        <code id="key-plain"></code>
+        <button class="btn" id="key-copy">复制</button>
+      </div>
+    </div>
+    <div class="tablewrap glass"><table id="key-table"><thead><tr>
+      <th>名称</th><th>密钥前缀</th><th>状态</th><th>今日/配额</th><th>累计</th><th>最近调用</th><th>操作</th>
+    </tr></thead><tbody></tbody></table></div>
+  </section>
+
+  <section id="pg-usage" class="page">
+    <h2 class="ptitle">用量统计</h2>
+    <div class="toolbar">
+      <select id="usage-days"><option value="7">最近 7 天</option><option value="14">最近 14 天</option><option value="30">最近 30 天</option></select>
+      <button class="btn" id="usage-refresh">刷新</button>
+      <span class="hint" id="usage-sum"></span>
+    </div>
+    <div id="usage-chart" class="chart glass"></div>
+    <div class="grid2">
+      <div class="glass pad"><h3>按接口统计</h3><table id="usage-ep"><thead><tr><th>接口</th><th>调用次数</th></tr></thead><tbody></tbody></table></div>
+      <div class="glass pad"><h3>最近调用</h3><table id="usage-logs"><thead><tr><th>时间</th><th>接口</th><th>结果</th><th>耗时</th></tr></thead><tbody></tbody></table></div>
+    </div>
+  </section>
+
+  <section id="pg-verify" class="page">
+    <h2 class="ptitle">开发者认证</h2>
+    <div id="verify-body"></div>
+  </section>
+
+  <!-- ===================== API 文档 ===================== -->
+  <section id="pg-docs" class="page">
+    <h2 class="ptitle">CyanCodex 开放 API 文档</h2>
+    <div class="docslayout">
+      <aside class="docnav glass" id="docs-nav"></aside>
+      <div class="docsbody" id="docs-body"></div>
+    </div>
+  </section>
+
+  <!-- ===================== 在线调试 ===================== -->
+  <section id="pg-play" class="page">
+    <h2 class="ptitle">在线调试</h2>
+    <p class="hint">填入密钥即可在浏览器里直接调用接口（密钥只保存在本机 localStorage，不会上传到别处）。</p>
+    <div class="glass pad">
+      <label>API 密钥（X-API-Key）</label>
+      <input id="play-key" placeholder="cyx_...">
+      <label>接口</label>
+      <select id="play-api"></select>
+      <label>请求参数（JSON）</label>
+      <textarea id="play-args" rows="8" spellcheck="false"></textarea>
+      <div class="toolbar">
+        <button class="btn primary" id="play-run">发送请求</button>
+        <button class="btn" id="play-preset">填入示例</button>
+      </div>
+      <p class="msg" id="play-msg"></p>
+    </div>
+    <div class="glass pad">
+      <h3>返回结果</h3>
+      <pre id="play-out" class="code">（还没有请求）</pre>
+    </div>
+  </section>
+
+  <!-- ===================== 插件开发 ===================== -->
+  <section id="pg-plugin" class="page">
+    <h2 class="ptitle">CyanCodex 插件开发</h2>
+    <div class="docsbody" id="plugin-body"></div>
+  </section>
+</div>
+
+<footer class="foot">沧蓝工坊 · CyanCodex 开发者平台 · 基岩版指令生成 API</footer>
+<script src="/dev/docs.js"></script>
+<script src="/dev/dev.js"></script>
+</body>
+</html>

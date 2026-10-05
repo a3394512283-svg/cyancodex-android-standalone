@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CyanCodex 沧蓝工坊 · 我的世界基岩版指令助手</title>
+<meta name="description" content="CyanCodex（沧蓝工坊）是专为我的世界基岩版玩家打造的指令助手：海量指令库、T显/计分板生成器、穷举、滚动字幕、音乐生成器、AI 助手、插件工坊，还有开放 API 与开发者平台。">
+<!-- OG:START 微信/社交平台分享卡片(由 .deploy/og/inject_og.py 生成, 勿手改) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CyanCodex 沧蓝工坊">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:title" content="CyanCodex 沧蓝工坊 · 基岩版指令助手">
+<meta property="og:description" content="指令库、T显/计分板、穷举、滚动字幕、音乐生成器与 AI 助手，安卓 / 网页 / Java 模组全平台。">
+<meta property="og:url" content="https://cyancodex.cn/">
+<meta property="og:image" content="https://cyancodex.cn/assets/og-cover.png">
+<meta property="og:image:width" content="478">
+<meta property="og:image:height" content="478">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="CyanCodex 沧蓝工坊 · 基岩版指令助手">
+<!-- OG:END -->
+<meta name="theme-color" content="#0B1512">
+<link rel="canonical" href="https://cyancodex.cn/">
+<link rel="icon" href="assets/logo-app.png">
+<link rel="apple-touch-icon" href="assets/logo-app.png">
+<link rel="stylesheet" href="style.css?v=20260913c">
+  <link rel="stylesheet" href="assets/cs.css?v=1">
+</head>
+<body>
+<div class="bg-glow g1"></div>
+<div class="bg-glow g2"></div>
+<div class="bg-glow g3"></div>
+
+<!-- ===== 顶部导航 ===== -->
+<header class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="brand" href="#top">
+      <img src="assets/logo-app.png" alt="CyanCodex">
+      <span class="brand-text"><b>CyanCodex</b><i>沧蓝工坊</i></span>
+    </a>
+    <nav class="nav-links" id="nav-links">
+      <a href="#features">功能</a>
+      <a href="#generators">生成器</a>
+      <a href="#api">开放 API</a>
+      <a href="#plugins">插件</a>
+      <a href="#download">Java 模组</a>
+      <a href="#offline">离线版</a>
+      <a href="#toolbox">工具箱</a>
+      <a href="guide.html">使用教程</a>
+      <a href="#changelog">更新日志</a>
+      <a href="#faq">常见问题</a>
+    </nav>
+    <div class="nav-actions">
+      <button class="icon-btn" id="theme-btn" title="切换主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          <path id="theme-ico" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+      <a class="btn primary small" id="nav-download" href="#download">立即下载</a>
+      <button class="icon-btn menu-btn" id="menu-btn" title="菜单">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ===== 首屏 ===== -->
+<section class="hero" id="top">
+  <div class="hero-inner">
+    <div class="hero-text">
+      <span class="pill">基岩版 · Bedrock Edition</span>
+      <h1>一款<br><span class="grad">现代化的指令助手</span></h1>
+      <p class="hero-sub">
+        为我的世界基岩版玩家打造：<b>指令库</b>、<b>T显/计分板生成器</b>、<b>穷举</b>、<b>滚动字幕</b>、
+        <b>音乐生成器</b>、<b>AI 助手</b>，还有图形化<b>插件工坊</b>与<b>开放 API</b>，让指令创作变得简单又优雅。
+      </p>
+      <div class="hero-actions">
+        <a class="btn primary" id="hero-download" href="#download">立即下载</a>
+        <a class="btn ghost" href="#features">看看功能</a>
+        <a class="btn ghost" href="https://qun.qq.com/universal-share/share?ac=1&amp;authKey=hwdWfjhcrT2gyREXBglanWfdHTMjrjUvEvVSSg8%2FVGx8E10%2FEVdfp3H0OJPPTPdi&amp;busi_data=eyJncm91cENvZGUiOiIxMDY1MDI1ODc0IiwidG9rZW4iOiJiZ0JFVG9Uakc3ZDcrZkZyK0cxVStZOEErYU1Ja1o5S1ZjUFlYM0padVdsVUNGKytrZ1lidvkrakZ5YjhmbWR4IiwidWluIjoiMzYxNTc4NTc2OSJ9&amp;data=ZezSPJyBUEcAwSLrXEOkeiTVTvEZK8FRMEkY2BQdfpP_GIPfHokXrTLjcvEzf7ZehLL-nD00FXXW5z7Z2chqZA&amp;svctype=4&amp;tempid=h5_group_info" target="_blank" rel="noopener" title="QQ 群 1065025874 · 加入一起交流指令"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M21.395 15.035a40 40 0 0 0-.803-2.264l-1.079-2.695c.001-.032.014-.562.014-.836C19.526 4.632 17.351 0 12 0S4.474 4.632 4.474 9.241c0 .274.013.804.014.836l-1.08 2.695a39 39 0 0 0-.802 2.264c-1.021 3.283-.69 4.643-.438 4.673c.54.065 2.103-2.472 2.103-2.472c0 1.469.756 3.387 2.394 4.771c-.612.188-1.363.479-1.845.835c-.434.32-.379.646-.301.778c.343.578 5.883.369 7.482.189c1.6.18 7.14.389 7.483-.189c.078-.132.132-.458-.301-.778c-.483-.356-1.233-.646-1.846-.836c1.637-1.384 2.393-3.302 2.393-4.771c0 0 1.563 2.537 2.103 2.472c.251-.03.581-1.39-.438-4.673"/></svg>加入QQ群</a>
+      </div>
+      <div class="hero-meta" id="hero-meta">正在获取最新版本…</div>
+    </div>
+
+    <!-- 手机预览 (纯 CSS 绘制, 无需截图) -->
+    <div class="phone-wrap">
+      <div class="phone">
+        <div class="phone-notch"></div>
+        <div class="phone-screen">
+          <div class="app-bar">
+            <img src="assets/logo-app.png" alt="">
+            <span>CyanCodex</span>
+            <span class="app-bar-right">0 积分</span>
+          </div>
+          <div class="app-body">
+            <div class="app-card primary">
+              <div class="app-card-title">T显生成器</div>
+              <div class="app-card-desc">计分板 / T显字幕</div>
+            </div>
+            <div class="app-grid">
+              <div class="app-mini">指令库</div>
+              <div class="app-mini">穷举</div>
+              <div class="app-mini">滚动字幕</div>
+              <div class="app-mini">音乐生成器</div>
+              <div class="app-mini">T显JSON</div>
+              <div class="app-mini">AI 助手</div>
+            </div>
+            <div class="app-chat">
+              <div class="bubble left">这条指令怎么写呀？</div>
+              <div class="bubble right">/titleraw @a title {"rawtext":[…]}</div>
+              <div class="bubble left">生成器里直接拼就好了</div>
+            </div>
+          </div>
+          <div class="app-tabbar">
+            <span class="on">首页</span><span>指令库</span><span>广场</span><span>生成器</span><span>我的</span>
+          </div>
+        </div>
+      </div>
+      <div class="phone-glow"></div>
+    </div>
+  </div>
+  <div class="scroll-hint">向下滚动了解更多 ↓</div>
+</section>
+
+<!-- ===== 功能 ===== -->
+<section class="section" id="features">
+  <div class="section-head">
+    <h2>多种实用功能</h2>
+    <p>从查指令到生成复杂 T 显，一个 App 全部搞定</p>
+  </div>
+  <div class="grid cards">
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#4ADE80">库</div>
+      <h3>指令库</h3>
+      <p>平台收录 + 用户上传，支持搜索、分类、收藏、点赞，一键复制到游戏。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#FBBF24">T</div>
+      <h3>T显 / 计分板生成器</h3>
+      <p>侧边栏计分板与 titleraw T 显字幕，填参数即可生成可用的命令方块指令。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#A78BFA">举</div>
+      <h3>穷举生成器</h3>
+      <p>模板里写 <code>{变量}</code>，一次展开上百上千条指令，批量工作交给它。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#F472B6">幕</div>
+      <h3>滚动字幕</h3>
+      <p>轮播公告或逐字盔甲架横幅，服务器公告、活动提示随手就能做。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#34D399">音</div>
+      <h3>音乐生成器</h3>
+      <p>音符网格 → 命令方块音乐，支持 16 种乐器与循环播放。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#22D3EE">J</div>
+      <h3>T显 JSON 编辑器</h3>
+      <p>可视化拼装 rawtext：文字、翻译、选择器、计分板、顺序拼接，实时预览。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#60A5FA">AI</div>
+      <h3>AI 指令助手</h3>
+      <p>不会写？描述需求让 AI 直接给指令，还能结合维基资料回答游戏问题。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#F59E0B">棋</div>
+      <h3>五子棋对战</h3>
+      <p>人机对战与好友匹配，多种 AI 难度，边玩边聊。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#C084FC">聊</div>
+      <h3>聊天室与好友</h3>
+      <p>公共聊天室、私信、好友系统，找到一起玩指令的伙伴。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#38BDF8">坊</div>
+      <h3>插件工坊</h3>
+      <p>图形化（积木式）做插件，一键打包成 JAR，全程离线、不需要电脑。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#FB923C">盘</div>
+      <h3>输入法模式</h3>
+      <p>注册成系统输入法，游戏聊天框里切一下就能一键插入指令。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#2DD4BF">窗</div>
+      <h3>悬浮窗</h3>
+      <p>全局悬浮窗快速取用常用指令，不用来回切应用。</p>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 生成器示例 ===== -->
+<section class="section alt" id="generators">
+  <div class="section-head">
+    <h2>生成器怎么用</h2>
+    <p>填几个参数，直接得到能用的命令方块指令</p>
+  </div>
+  <div class="tabs">
+    <div class="tab-bar" id="gen-tabs">
+      <button class="tab on" data-tab="sb">T显 / 计分板</button>
+      <button class="tab" data-tab="enum">穷举</button>
+      <button class="tab" data-tab="scroll">滚动字幕</button>
+      <button class="tab" data-tab="music">音乐</button>
+      <button class="tab" data-tab="raw">T显 JSON</button>
+    </div>
+    <div class="tab-panels">
+      <div class="panel on" data-panel="sb">
+        <h3>T显 / 计分板</h3>
+        <p>输入计分项名称、显示名与玩家分数，得到计分板创建与显示指令；切换到 T显模式还能生成 titleraw 字幕。</p>
+        <pre class="code">/scoreboard objectives add sb dummy "分数"
+/scoreboard objectives setdisplay sidebar sb
+/scoreboard players set Steve sb 10</pre>
+      </div>
+      <div class="panel" data-panel="enum">
+        <h3>穷举</h3>
+        <p>模板 + 变量候选值，自动做笛卡尔积批量展开，一次生成成百上千条指令。</p>
+        <pre class="code">模板: give @p {item} {n}
+变量: item = apple, bread    n = 1, 2
+
+give @p apple 1
+give @p apple 2
+give @p bread 1
+give @p bread 2</pre>
+      </div>
+      <div class="panel" data-panel="scroll">
+        <h3>滚动字幕</h3>
+        <p>按空格分词做轮播公告，或生成逐字盔甲架横幅，附带节拍器与复位指令。</p>
+        <pre class="code">/scoreboard objectives add cyx_scroll dummy "滚动字幕"
+/execute as @a run scoreboard players add @s cyx_scroll 1
+/execute as @a if score @s cyx_scroll matches 1 run titleraw @a title {"rawtext":[{"text":"欢迎来到服务器","color":"gold"}]}</pre>
+      </div>
+      <div class="panel" data-panel="music">
+        <h3>音乐生成器</h3>
+        <p>在网格里放音符，自动按 tick 分组生成 playsound 指令，16 种乐器可选。</p>
+        <pre class="code">/execute as @a if score @s cyx_music matches 0 run playsound note.harp @s ~ ~ ~ 1 0.500
+/execute as @a if score @s cyx_music matches 1 run playsound note.bell @s ~ ~ ~ 1 1.000</pre>
+      </div>
+      <div class="panel" data-panel="raw">
+        <h3>T显 JSON 编辑器</h3>
+        <p>把文字、玩家名、分数、翻译等元素拼成 rawtext，实时预览玩家看到的效果。</p>
+        <pre class="code">/titleraw @a title {"rawtext":[
+  {"text":"欢迎 "},
+  {"selector":"@p"},
+  {"text":" 你的分数 "},
+  {"score":{"name":"@s","objective":"sb"}}
+]}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 开放 API ===== -->
+<section class="section" id="api">
+  <div class="section-head">
+    <h2>开放 API 与开发者平台</h2>
+    <p>把生成器能力接进你自己的程序、服务器插件或机器人</p>
+  </div>
+  <div class="api-wrap">
+    <div class="api-text">
+      <ul class="ticks">
+        <li>接口覆盖 App 内<b>全部生成器</b>：T显/计分板、穷举、滚动字幕、音乐、T显 JSON、批量生成</li>
+        <li>与 App <b>同一套算法</b>，输出指令完全一致（基岩版 Bedrock）</li>
+        <li>登录采用 <b>账号密码 + 图形验证码 + 邮箱验证码 + App 站内信验证码</b> 三重校验</li>
+        <li>免费额度每日 2000 次，认证开发者可提升；支持用量统计与调用日志</li>
+      </ul>
+      <div class="hero-actions">
+        <a class="btn primary" href="https://app.blueworkshop.top/dev/" target="_blank" rel="noopener">进入开发者平台</a>
+        <a class="btn ghost" href="#plugins">看看插件开发</a>
+      </div>
+    </div>
+    <div class="api-code">
+      <div class="code-head">POST /api/v1/gen/scroller</div>
+      <pre class="code">curl -X POST https://app.blueworkshop.top/api/v1/gen/scroller \
+  -H "X-API-Key: cyx_你的密钥" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"欢迎来到服务器 今晚八点活动","mode":"roll","color":"gold"}'
+
+{
+  "ok": true,
+  "data": {
+    "generator": "scroller",
+    "count": 11,
+    "commands": ["/scoreboard objectives add cyx_scroll dummy \"滚动字幕\"", "..."]
+  }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 插件 ===== -->
+<section class="section alt" id="plugins">
+  <div class="section-head">
+    <h2>插件系统</h2>
+    <p>不会写代码也能做插件；会写代码可以做得更多</p>
+  </div>
+  <div class="grid two">
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#38BDF8">坊</div>
+      <h3>插件工坊（图形化）</h3>
+      <p>App 首页 →「开发者功能 · 插件工坊」：用积木拼出插件行为（记录日志、弹出提示、读写配置、自定义主界面背景），
+        点一下就能<b>离线打包成 JAR</b>，自动安装并热重载。</p>
+      <p class="muted small">不需要电脑、不需要编译器，生成的 JAR 还能分享给其他用户。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#4ADE80">码</div>
+      <h3>手写 Java 插件</h3>
+      <p>实现 <code>CyanPlugin</code> 接口（可选 <code>BackgroundProvider</code>），用 javac 编译、d8 转 dex、
+        放进插件目录即可，App 内置「开发者示例插件」带完整注释。</p>
+      <pre class="code small">public class DemoPlugin implements CyanPlugin {
+  public String getId()   { return "dev.cyancodex.demo"; }
+  public String getName() { return "我的插件"; }
+  public void onEnable(Context ctx) { }
+  public void onDisable() { }
+}</pre>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 更新日志 ===== -->
+<section class="section" id="changelog">
+  <div class="section-head">
+    <h2>更新日志</h2>
+    <p>持续更新中，更多历史版本见 App 内「更新日志」</p>
+  </div>
+  <div class="timeline" id="timeline">
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>Cyan工具箱 v1.0.5</b><span class="tl-tag">新</span></div>
+        <p>[+] 新增<b>数据查询</b>：快递物流 / IP 归属地与风险 / 网易云音乐（搜索、详情、歌词、试听）/ 王者荣耀 / 和平精英。
+          走官方服务器代理，接口密钥只存在服务端（不进 APK），并带缓存与限流保护上游额度</p>
+        <p>[+] 新增<b>本地助手（离线）</b>：本机知识库问答 —— 工具怎么用、报错码是什么意思，能一键跳到对应工具；查询结果支持朗读</p>
+        <p>[+] 新增<b>局域网设备管理</b>：发现设备（IP/MAC/厂商/开放端口/类型猜测）、延迟与丢包统计、本机网络体检、网络唤醒(WOL)</p>
+        <p>[!] 说明：局域网功能<b>只做发现与检测</b>。让其他设备断网 / 掉线 / 干扰通信（ARP 欺骗、deauth、泛洪等）属于攻击行为，
+          违反《网络安全法》，本 App 不提供这类功能</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>Cyan工具箱 v1.0.4</b></div>
+        <p>[+] <b>全屏适配</b>：适配 Android 15+ 的强制全屏与带摄像头挖孔的机型 —— 状态栏 / 挖孔区域改为
+          「自适应底色条」（暗色主题下就是近黑），顶栏与内容整体下移到安全区，不再被系统栏或摄像头挡住</p>
+        <p>[+] 界面保持清爽的卡片风格；专属工具箱图标不变</p>
+      </div>
+    </div>
+        <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>Cyan工具箱 v1.0.1</b></div>
+        <p>[+] 搬入 devil-tool 的一批玩机功能：<b>APK 解析</b>（二进制清单：包名/版本/SDK/权限/四大组件）、<b>网页源码提取</b>、<b>AES-256 加解密</b>、<b>环境安装教程</b>（Java/Python/Node/Go/C++/Termux/ADB/Git）、<b>世界 15 城市时区</b></p>
+        <p>[+] 新增：<b>已装应用提取 APK</b>、文件哈希校验、<b>屏幕测试</b>、<b>电池健康</b>、<b>文本朗读</b>、<b>验证码提取</b>（粘贴即取，不要短信权限）、<b>端口扫描</b>、<b>局域网设备发现</b>、<b>网速测速</b></p>
+        <p>[+] 新增：<b>悬浮窗音乐</b> —— 通知使用权同步 QQ 音乐/网易云正在播放的歌，悬浮控制条可拖动、可切歌</p>
+        <p>[!] 未搬：卡密/付费解锁、聊天室/客服（那是 devil-tool 自己的后端）、断网测试等攻击性功能、猜角色游戏</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>Cyan工具箱 v1.0.0</b></div>
+        <p>[+] 全新独立 App：文本工具（JSON / Base64 / 哈希 / URL 编码与乱码修复）、转换工具（进制 / 时间戳 / 颜色 / 单位换算）、生成工具（随机密码 / 二维码）、系统工具（设备信息 / DNS / TCP 连通性）</p>
+        <p>[+] 与主 App 唯一的联系是<b>账号</b>：用同一个沧蓝工坊账号登录，可看积分与签到；不登录也能用全部工具</p>
+        <p>[+] 工具全部本机运算，输入内容不上传；可与完整版、离线版同时安装（<a href="#toolbox">下载工具箱</a>）</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>CyanCodex 离线版 v1.0.1</b><span class="tl-tag">新</span></div>
+        <p>[+] <b>全屏适配</b>：顶部给状态栏 / 摄像头挖孔留自适应底色条，生成器页面顶端不再被遮挡</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>CyanCodex 离线版 v1.0.0</b></div>
+        <p>[+] 独立 App：只保留生成器（T显 / 穷举 / 滚动字幕 / 音乐生成器含 MIDI 导入 / T显 JSON 编辑器 + 生成历史）</p>
+        <p>[+] 真离线：安装包<b>没有申请联网权限</b>，不登录、无账号、无后台服务，生成记录只存本机</p>
+        <p>[+] 与完整版包名不同，可同时安装（图标底色青蓝，完整版深绿）；<a href="#offline">下载离线版</a></p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.95</b><span class="tl-tag">最新</span></div>
+        <p>[+] 「生成器」页签升级为「工具箱」：生成器功能照旧，新增隐私保护与网络测速</p>
+        <p>[+] 隐私保护 · 广告弹窗拦截：自动识别并关闭其它应用的开屏 / 插屏 / 激励视频 / 广告落地页（覆盖优量汇、穿山甲、快手联盟、百度联盟等常见广告 SDK），可开启「拦截后结束应用」，每次拦截弹横幅提醒，支持白名单</p>
+        <p>[+] 网络测速：一键测延迟 / 抖动 / 下载 / 上传，用官方服务器做测速节点，留最近 15 次记录</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.94</b></div>
+        <p>[+] 服务器线路迁移完成：接口 / 安装包下载 / 网页版 / QQ 机器人全部迁到新线路</p>
+        <p>[+] 账号、积分、收藏、上传的指令等数据完整迁移，不受影响</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.85</b></div>
+        <p>[+] 服务器线路升级：直连沧蓝工坊高防主服务器，更快更稳定，异常自动回退备用线路</p>
+        <p>[+] 服务器迁移完成：账号、积分、指令库、聊天室记录、插件等数据全部保留</p>
+        <p>[-] 聊天室消息改为增量拉取，加载更快更省流量</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.84</b></div>
+        <p>[+] 开发者功能 · 插件工坊：图形化（积木式）制作插件</p>
+        <p>[+] 一键打包 JAR，自动写入插件目录并热重载，全程离线</p>
+        <p>[-] 修复插件加载：内置「自定义背景」等插件在正式版加载失败的问题</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.83</b></div>
+        <p>[-] 修复付费指令闪退、修复五子棋误扣积分并退回受影响用户积分</p>
+      </div>
+    </div>
+    <div class="tl-item reveal">
+      <div class="tl-dot"></div>
+      <div class="tl-body">
+        <div class="tl-head"><b>v1.0.82</b></div>
+        <p>[+] 开学季福利、付费指令；[+] 聊天室长按消息可删除/举报/复制</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 下载 ===== -->
+<section class="section alt" id="download">
+  <div class="section-head">
+    <h2>下载 CyanCodex</h2>
+    <p>选择你的平台，立即体验更简单的指令创作</p>
+  </div>
+  <div class="grid three">
+    <a class="dl-card reveal" id="dl-android" href="#" target="_blank" rel="noopener">
+      <div class="dl-ico" style="color:#4ADE80" title="Android"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M18.44 5.559q-1.015 1.748-2.028 3.498q-.055-.023-.111-.043a12.1 12.1 0 0 0-8.68.033C7.537 8.897 5.868 6.026 5.6 5.56a1 1 0 0 0-.141-.19a1.104 1.104 0 0 0-1.768 1.298c1.947 3.37-.096-.216 1.948 3.36c.017.03-.495.263-1.393 1.017C2.9 12.176.452 14.772 0 18.99h24a11.7 11.7 0 0 0-.746-3.068a12.1 12.1 0 0 0-2.74-4.184a12 12 0 0 0-2.131-1.687c.66-1.122 1.312-2.256 1.965-3.385a1.11 1.11 0 0 0-.008-1.12a1.1 1.1 0 0 0-.852-.532c-.522-.054-.939.313-1.049.545m-.04 8.46c.395.593.324 1.331-.156 1.65c-.48.32-1.188.1-1.582-.493s-.324-1.33.156-1.65c.473-.316 1.182-.11 1.582.494m-11.193-.492c.48.32.55 1.058.156 1.65c-.394.593-1.103.815-1.584.495c-.48-.32-.55-1.058-.156-1.65c.4-.603 1.109-.811 1.584-.495"/></svg></div>
+      <h3>Android</h3>
+      <p class="dl-ver" id="dl-ver">获取中…</p>
+      <span class="btn primary small">下载 APK</span>
+    </a>
+    <div class="dl-card disabled reveal">
+      <div class="dl-ico" style="color:#38BDF8" title="Windows"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M0 0h11.377v11.372H0Zm12.623 0H24v11.372H12.623ZM0 12.623h11.377V24H0Zm12.623 0H24V24H12.623"/></svg></div>
+      <h3>Windows 电脑版</h3>
+      <p class="dl-ver">开发中，敬请期待</p>
+      <span class="btn ghost small">即将推出</span>
+    </div>
+    <a class="dl-card reveal" href="https://app.blueworkshop.top/downloads/CyanCodex-Offline-v1.0.1.apk" download>
+      <div class="dl-ico" style="color:#2DD4BF" title="Android 离线版"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M17.5 3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1zM5.5 3.5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h1a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1zM9 2h6v1.5H9zM7.5 5.5h9V16a3 3 0 0 1-3 3h-3a3 3 0 0 1-3-3zM10.2 8.2v4.6h1.2v-2l1.2 2h1.2V8.2h-1.2v2l-1.2-2z"/></svg></div>
+      <h3>Android · 离线版</h3>
+      <p class="dl-ver">v1.0.1 · 只有生成器，不联网</p>
+      <span class="btn primary small">下载 APK</span>
+    </a>
+    <a class="dl-card reveal" href="https://app.blueworkshop.top/downloads/CyanToolbox-v1.0.5.apk" download>
+      <div class="dl-ico" style="color:#A78BFA" title="Cyan工具箱"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M21 6h-2v2a2 2 0 0 1-2 2h-3v-1a2 2 0 1 0-4 0v1H7a2 2 0 0 1-2-2V6H3a1 1 0 0 0-1 1v4a2 2 0 0 0 2 2h1v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5h1a2 2 0 0 0 2-2V7a1 1 0 0 0-1-1zM9 18v-4h2v4zm4 0v-4h2v4z"/></svg></div>
+      <h3>Android · 工具箱</h3>
+      <p class="dl-ver">v1.0.5 · 玩机工具合集 + 数据查询</p>
+      <span class="btn primary small">下载 APK</span>
+    </a>
+    <a class="dl-card reveal" href="https://app.blueworkshop.top/web/" target="_blank" rel="noopener">
+      <div class="dl-ico" style="color:#A78BFA" title="网页版"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2m-5.15 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56M14.34 14H9.66c-.1-.66-.16-1.32-.16-2s.06-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2M12 19.96c-.83-1.2-1.5-2.53-1.91-3.96h3.82c-.41 1.43-1.08 2.76-1.91 3.96M8 8H5.08A7.92 7.92 0 0 1 9.4 4.44C8.8 5.55 8.35 6.75 8 8m-2.92 8H8c.35 1.25.8 2.45 1.4 3.56A8 8 0 0 1 5.08 16m-.82-2C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2M12 4.03c.83 1.2 1.5 2.54 1.91 3.97h-3.82c.41-1.43 1.08-2.77 1.91-3.97M18.92 8h-2.95a15.7 15.7 0 0 0-1.38-3.56c1.84.63 3.37 1.9 4.33 3.56M12 2C6.47 2 2 6.5 2 12a10 10 0 0 0 10 10a10 10 0 0 0 10-10A10 10 0 0 0 12 2"/></svg></div>
+      <h3>网页版</h3>
+      <p class="dl-ver">免安装，打开即用</p>
+      <span class="btn ghost small">打开网页版</span>
+    </a>
+    <a class="dl-card reveal" href="downloads/cyancodex-fabric-1.0.0%2B1.20.1-1.21.8.jar" download>
+      <div class="dl-ico" style="color:#FBBF24" title="Java 版模组"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="m23.74 10.006l-2.443.002l-.076.12l-.03-.118h-2.458l-.06.136l-.023-.136l-2.48.003l-.043.161l-.016-.161l-2.503.002l-.023.265l-.007-.265l-2.518.005l-.01.242l-.025-.242l-2.495.002l-.016.157l-.044-.157H7.267l-.097.67l-.055-.138l-.025-.002l-.21-.53l-1.189.002l-.023.13l-.062-.13H4.431l-.03.12l-.07-.12l-1.165.003l-.136.523h-.316l-.06.228l-.55-.751l-1.134.002L0 13.04l1.03.954h1.124l.178-.67l.087.097h.3l.5.573h1.154l.023-.108l.081.108h1.164l.02-.117l.074.117H6.91l.09-.629l.302.63H8.49l.014-.146l.05.145h2.475l.01-.228l.027.228h2.495l.023-.25l.01.25h1.223l.04-.175l.01.175h1.21l.051-.152l.014.152h1.196l.062-.133l.018.133h1.185l.071-.122l.021.122h1.175l.68-.967l-.032-.155h.375l.535-.74l.456 1.86h1.152l.963-.959l-.018-.073l-.074-.254l-.07-.233l-.246-.806l-.103-.346l-.005-.018l.484-.583zm-2.325.168h2.2l.157.493h-.638l.004.016q.04.164.085.33c.03.113.065.226.097.343l.106.353q.056.178.109.357l.066.219q.034.112.07.223l.069.228l.066.228h-.997l-.627-2.297h-.64zm-.355.002l.122.493h-1.295l.118.56h1.313l.136.553H20.12l.246 1.182l-.995.003l-.51-2.788zm-2.553.003l.481 2.788h-.995l-.129-.899h-.373l.122.899h-.996l-.306-2.786zm-2.549.002l.104 1.032h-.327l.03.311h.327l.145 1.443h-.993l-.09-1.176l-.368-.009l.076 1.185h-.993l-.104-2.784zm-2.546.002l.014.493h-1.272l-.03 1.72h1.35l.017.573h-2.364l.094-2.783zm-2.543.003l-.021.493H9.56l-.041.569l1.304.002l-.023.537l-1.33.002l-.044.602l1.346.004l-.025.574h-2.36l.293-2.781zm-2.54.002l-.322 2.78h-.99l.124-.884l-.328-.01l.083-.573l-.36-.007l-.234 1.477H5.31l.518-2.78h.917l-.08.513l.315.01l-.076.536l.355.005l.15-1.065zm-5.034.004h.917l-.648 2.78h-.988l.297-1.18h-.357l-.154.573h-.64l.158-.573h-.36l-.35 1.18H.2l.892-2.777h.899l-.148.504l.314.012l-.157.546h.696l.145-.54h.318zm2.182.005l-.546 2.781h-.989L4.56 10.2zm12.168.422l.04.325l-.342-.003l-.043-.32h-.422l.044.353h.387l.018.128h-.193l.071.547h.233l-.019-.185l.346-.002l.03.187h.237l-.083-.542h-.193l-.016-.131l.396-.003l-.055-.354zm-2.928.055l.036.574h.364l-.043-.574zm-1.196 1.005l.018.548l-1.216-.002l.011-.41h1.177Z"/></svg></div>
+      <h3>Java 版 · 模组</h3>
+      <p class="dl-ver">支持 1.20.1 – 1.21.8</p>
+      <span class="btn primary small">下载 .jar</span>
+    </a>
+    <a class="dl-card reveal" href="downloads/cyancodex-fabric-1.0.0%2B26.2.jar" download>
+      <div class="dl-ico" style="color:#F472B6" title="Java 版 26.2"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M16.5 6.08s-6.84 1.71-3.56 5.48c.97 1.11-.25 2.11-.25 2.11s2.45-1.25 1.31-2.85c-1.06-1.47-1.86-2.2 2.5-4.74m-4.47 1.2C16.08 4.08 14 2 14 2c.84 3.3-2.96 4.3-4.33 6.36c-.94 1.4.46 2.91 2.33 4.64c-.71-1.7-3.22-3.16.03-5.72M9.37 17.47c-3.08.86 1.88 2.63 5.79.96c-.38-.15-.75-.33-1.1-.54c-1.36.31-2.76.37-4.14.18c-1.31-.16-.55-.6-.55-.6m5.32-1.68c-1.75.38-3.56.47-5.34.26c-1.31-.13-.45-.77-.45-.77c-3.4 1.13 1.88 2.4 6.6 1.02c-.29-.11-.57-.3-.81-.51m3.42 3.3s.57.47-.61.83c-2.28.68-9.43.89-11.41.03c-.71-.31.63-.74 1.05-.83c.23-.06.46-.08.69-.08c-.79-.54-5.13 1.1-2.19 1.56c7.97 1.3 14.54-.6 12.47-1.51m-2.74-4.86c.29-.19.6-.35.92-.49c0 0-1.51.26-3.02.4c-1.6.16-3.21.18-4.81.06c-2.35-.31 1.29-1.2 1.29-1.2c-1.1 0-2.18.26-3.16.75c-2.05 1 5.1 1.45 8.78.48m.9 2.42c-.02.04-.04.07-.08.1c5.01-1.31 3.17-4.64.77-3.81c-.13.06-.24.14-.31.25c.14-.05.28-.09.43-.12c1.2-.24 2.92 1.63-.81 3.58m.13 4.61c-3.01.52-6.09.56-9.12.14c0 0 .46.38 2.81.53c3.6.23 9.13-.13 9.26-1.83c.03.01-.23.65-2.95 1.16"/></svg></div>
+      <h3>Java 版 · 26.2</h3>
+      <p class="dl-ver">最新版游戏（需 Java 25）</p>
+      <span class="btn primary small">下载 .jar</span>
+    </a>
+    <a class="dl-card reveal" href="https://git.cyancodex.cn/" target="_blank" rel="noopener">
+      <div class="dl-ico" style="color:#2DD4BF" title="开源源码"><svg class="ico-svg" xmlns="http://www.w3.org/2000/svg" height="1em" viewBox="0 0 24 24"><path fill="currentColor" d="M14.6 16.6L19.2 12l-4.6-4.6L16 6l6 6l-6 6m-5.2 0L4.8 12l4.6-4.6L8 6l-6 6l6 6z"/></svg></div>
+      <h3>开源源码</h3>
+      <p class="dl-ver">前端 · 生成器 · 插件 SDK（GPLv3）</p>
+      <span class="btn ghost small">浏览源码</span>
+    </a>
+  </div>
+  <p class="muted small center" id="dl-hint">安装时如提示「不允许安装未知应用」，允许一次即可；Java 版请先装 Fabric Loader，把 .jar 放进 mods 文件夹。详细操作看 <a href="guide.html">使用教程</a>（也能下载 Markdown 离线看）。</p>
+</section>
+
+<!-- ===== 离线版下载 ===== -->
+<section class="section alt" id="offline">
+  <div class="section-head">
+    <h2>离线版 · 只有生成器</h2>
+    <p>不联网、不登录、没有账号：一个干净的纯本地指令生成器</p>
+  </div>
+  <div class="grid cards">
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#2DD4BF">离</div>
+      <h3>里面有什么</h3>
+      <p>T显生成器、穷举、滚动字幕、音乐生成器（含 MIDI 导入试听）、T显 JSON 编辑器、生成历史。
+        <br><span class="muted">指令库、AI 助手、广场、账号 / 签到、广告拦截、网络测速等需要联网的功能都不包含。</span></p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#38BDF8">净</div>
+      <h3>为什么说是真离线</h3>
+      <p>这个安装包<b>没有申请联网权限</b>——在手机「设置 → 应用 → 该应用 → 流量」里可以看到一条网络权限都没有；
+        没有后台服务、没有轮询、不需要账号，生成记录只保存在本机。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#FBBF24">装</div>
+      <h3>可以和完整版共存</h3>
+      <p>离线版包名与完整版不同，两个 App 能装在同一台手机上、互不影响；生成器与完整版完全一致，生成结果一键复制即用。
+        <br><span class="muted">图标底色是青蓝色，完整版是深绿色，方便区分。</span></p>
+    </div>
+  </div>
+  <div class="center" style="margin-top:24px">
+    <a class="btn primary" href="https://app.blueworkshop.top/downloads/CyanCodex-Offline-v1.0.1.apk" download>下载离线版 APK</a>
+    <a class="btn ghost" href="guide.html#offline">离线版怎么用</a>
+    <p class="muted small" style="margin-top:12px">v1.0.1 · 2.02 MB · Android 8.0 及以上 · 与完整版可共存<br>
+      MD5：<code>1fb441d1485b1806330579fb9c243b7e</code></p>
+  </div>
+</section>
+
+<!-- ===== Cyan工具箱 ===== -->
+<section class="section" id="toolbox">
+  <div class="section-head">
+    <h2>Cyan工具箱 · 玩机工具合集</h2>
+    <p>和主 App 没有功能重叠：只做通用工具，<b>账号与主 App 互通</b>（不登录也能用全部工具）</p>
+  </div>
+  <div class="grid cards">
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#22D3EE">文</div>
+      <h3>文本与加密</h3>
+      <p>JSON 格式化 / 压缩 / 校验、Base64（文本与图片互转）、MD5 / SHA-1 / SHA-256 / CRC32 与字数统计、
+        <b>AES-256-GCM 加解密</b>（自定义口令）、URL 编解码与乱码修复。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#A78BFA">换</div>
+      <h3>转换与换算</h3>
+      <p>2-36 任意进制互转、时间戳 ↔ 日期（带时区）、颜色 HEX / RGB / HSL 互转与配色建议、
+        长度 / 重量 / 面积 / 体积 / 数据 / 时间 / 温度换算、<b>世界 15 个城市实时时间</b>。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#F59E0B">开</div>
+      <h3>开发工具</h3>
+      <p><b>环境安装教程</b>（Java / Python / Node / Go / C++ / Termux / ADB / Git，一键跳官方下载）、
+        <b>网页源码提取</b>（抓 HTML 并转正文）、
+        <b>APK 解析</b>（读二进制清单：包名 / 版本 / SDK / 权限 / 四大组件 / 包结构）。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#60A5FA">件</div>
+      <h3>文件与系统</h3>
+      <p><b>已装应用提取 APK</b>（免 root 导出到下载目录）、文件哈希校验、
+        设备信息、<b>屏幕测试</b>（坏点/漏光）、<b>电池健康</b>（温度/电压/健康度）、
+        <b>文本朗读</b>、<b>验证码提取</b>（粘贴即取，不要短信权限）。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#34D399">网</div>
+      <h3>网络工具</h3>
+      <p>本机 IP / 网络类型、DNS 解析、TCP 连通测试、
+        <b>端口扫描</b>（常见端口或自定义范围）、<b>局域网设备发现</b>、
+        <b>网速测速</b>（用官方服务器做节点，不上第三方站）。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#F472B6">音</div>
+      <h3>悬浮窗音乐</h3>
+      <p>开启通知使用权后，<b>悬浮控制条自动同步 QQ 音乐 / 网易云等正在播放的歌</b>：
+        歌名歌手显示、上一首 / 播放暂停 / 下一首、可拖动、位置记忆。</p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#22D3EE">查</div>
+      <h3>数据查询</h3>
+      <p><b>快递物流</b>（含备用数据源）、<b>IP 归属地与风险</b>（VPN/代理/Tor 标记）、
+        <b>网易云音乐</b>（搜索 / 详情 / 歌词 / 试听）、<b>王者荣耀</b>与<b>和平精英</b>战绩查询。<br>
+        <span class="muted">走官方服务器代理，接口密钥不下发到 App；服务端带缓存，保护上游额度。</span></p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#A78BFA">问</div>
+      <h3>本地助手（离线）</h3>
+      <p>「怎么查快递」「APK 解析怎么用」「报错 510 是什么意思」——本机知识库直接回答，
+        并<b>一键跳到对应工具</b>；查询结果可朗读。<br>
+        <span class="muted">不联网、不需要 Key、不问就不上传任何内容。</span></p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#34D399">局</div>
+      <h3>局域网设备</h3>
+      <p>扫描局域网设备：<b>IP / MAC / 厂商识别 / 开放端口 / 设备类型猜测</b>，
+        支持延迟与丢包统计、本机网络体检（网关 / DNS / 服务器连通）、<b>网络唤醒(WOL)</b>。<br>
+        <span class="muted">只做「发现与检测」——不含也不会加任何让别的设备断网、干扰通信的功能。</span></p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#38BDF8">号</div>
+      <h3>账号互通</h3>
+      <p>用同一个沧蓝工坊账号登录（与主 App / 官网同账号），可看资料与积分、每日签到。
+        <b>不登录也能用全部工具。</b></p>
+    </div>
+    <div class="card reveal">
+      <div class="card-ico" style="--c:#4ADE80">净</div>
+      <h3>干净独立</h3>
+      <p>独立 App、独立包名，可与主 App、离线版同时安装；工具基本在本机运算，
+        输入内容不上传（只有登录与「网页源码」会联网）。</p>
+    </div>
+  </div>
+  <div class="center" style="margin-top:24px">
+    <a class="btn primary" href="https://app.blueworkshop.top/downloads/CyanToolbox-v1.0.5.apk" download>下载 Cyan工具箱 APK</a>
+    <a class="btn ghost" href="guide.html#toolbox">工具箱怎么用</a>
+    <p class="muted small" style="margin-top:12px">v1.0.1 · 2.31 MB · Android 8.0 及以上 · 与完整版、离线版可共存<br>
+      MD5：<code>3676a130138679760af5380d8132049a</code></p>
+  </div>
+</section>
+
+<!-- ===== 常见问题 ===== -->
+<section class="section" id="faq">
+  <div class="section-head">
+    <h2>常见问题</h2>
+  </div>
+  <div class="faq">
+    <details class="reveal"><summary>CyanCodex 是免费的吗？</summary><p>App 免费下载使用，指令库、生成器、插件工坊等功能都不收费；AI 助手按积分计费，签到、分享、活动都能获取积分。</p></details>
+    <details class="reveal"><summary>有没有不用联网的版本？</summary><p>有，就是上面的 <b>离线版</b>（<a href="#offline">下载</a>）：只保留生成器，不联网、不登录、不需要账号，安装包没有申请联网权限，占用更小。它和完整版包名不同，可以同时安装；需要指令库、AI、广告拦截等功能时，用完整版即可。</p></details>
+    <details class="reveal"><summary>Cyan工具箱是什么？和主 App 什么关系？</summary><p><b>Cyan工具箱</b>是另一个独立 App（<a href="#toolbox">下载</a>），只放通用小工具：JSON / Base64 / 哈希、进制 / 时间戳 / 颜色 / 单位换算、随机密码 / 二维码、设备信息 / DNS / 端口检测。它和主 App <b>没有功能重叠</b>，唯一的联系是<b>账号互通</b>——用同一个沧蓝工坊账号登录（可看积分、签到），不登录也能用全部工具。三个 App（完整版 / 离线版 / 工具箱）包名都不同，可以同时安装。</p></details>
+    <details class="reveal"><summary>Java 版怎么安装？</summary>
+      <p>下载上面的 <b>Java 版</b> .jar（1.20.1–1.21.8 用通用包，26.2 用对应包），然后：</p>
+      <ol style="margin:6px 0 4px 18px;color:var(--dim);font-size:13.5px;line-height:1.9">
+        <li>先装 <a href="https://fabricmc.net/use/installer/" target="_blank" rel="noopener">Fabric Loader</a>（选你的游戏版本），启动一次游戏生成 <code>mods</code> 文件夹；</li>
+        <li>把下载的 <code>.jar</code> 放进 <code>mods</code> 文件夹，重开游戏；</li>
+        <li>进游戏后打开 CyanCodex 面板，用 App 账号登录或填开放 API 密钥即可查指令、问 AI；</li>
+        <li>模组不修改游戏本体、不联机注入，卸载只需删掉那个 jar（26.2 需要 Java 25）。</li>
+      </ol>
+    </details>
+    <details class="reveal"><summary>插件工坊生成的插件安全吗？</summary><p>插件运行在 App 内，只能使用我们开放的接口（自定义背景、日志、配置等），不会读取你的账号数据；手写插件也只在本地运行。</p></details>
+    <details class="reveal"><summary>开放 API 怎么申请？</summary><p>注册 CyanCodex 账号后进入开发者平台，用「账号密码 + 图形验证码 + 邮箱验证码 + App 站内信验证码」登录即可创建密钥，默认每日 2000 次调用。</p></details>
+    <details class="reveal"><summary>数据存在哪里？会不会丢？</summary><p>账号、指令、聊天室等数据都在服务器数据库中，聊天室消息还会在本地管理端归档成 JSON 长期保留，可用于追溯。</p></details>
+  </div>
+</section>
+
+<!-- ===== 页脚 ===== -->
+<footer class="foot">
+  <div class="foot-inner">
+    <div class="foot-brand">
+      <img src="assets/logo-app.png" alt="CyanCodex">
+      <div>
+        <b>CyanCodex · 沧蓝工坊</b>
+        <p class="muted small">我的世界（基岩版）指令助手</p>
+      </div>
+    </div>
+    <div class="foot-links">
+      <a href="#features">功能</a>
+      <a href="#generators">生成器</a>
+      <a href="#api">开放 API</a>
+      <a href="#plugins">插件</a>
+      <a href="#download">下载</a>
+      <a href="privacy.html">隐私政策</a>
+      <a href="terms.html">用户协议</a>
+      <a href="https://github.com/Diamond-Minec/CyanCodex-Android" target="_blank" rel="noopener">GitHub</a>
+    </div>
+    <div class="foot-partners">
+      <span class="muted small">合作：世纪集团 · 矩阵方块</span>
+    </div>
+  </div>
+  <p class="muted small center">© 2026 沧蓝工坊工作室 · CyanCodex　<span id="foot-icp"></span></p>
+</footer>
+
+<a class="back-top" id="back-top" href="#top" title="回到顶部">↑</a>
+
+<script src="app.js?v=20260913c"></script>
+  <script src="assets/cs.js?v=1" defer></script>
+</body>
+</html>
+

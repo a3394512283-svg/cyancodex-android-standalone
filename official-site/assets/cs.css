@@ -1,0 +1,89 @@
+/* CyanCodex 官网 AI 客服 · 样式 */
+#csc-btn {
+  position: fixed; right: 18px; bottom: 18px; z-index: 9998;
+  width: 54px; height: 54px; border-radius: 50%; border: none; cursor: pointer;
+  background: linear-gradient(135deg, #38bdf8, #4ade80); color: #04240f;
+  box-shadow: 0 10px 26px rgba(56, 189, 248, .35);
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+#csc-btn:hover { transform: translateY(-2px); box-shadow: 0 14px 30px rgba(56, 189, 248, .45); }
+#csc-btn svg { width: 26px; height: 26px; }
+#csc-btn .csc-dot {
+  position: absolute; top: -2px; right: -2px; width: 13px; height: 13px; border-radius: 50%;
+  background: #f87171; border: 2px solid #0b1220; display: none;
+}
+#csc-btn.has-new .csc-dot { display: block; }
+
+#csc-panel {
+  position: fixed; right: 18px; bottom: 84px; z-index: 9999;
+  width: 380px; max-width: calc(100vw - 24px); height: 540px; max-height: calc(100vh - 120px);
+  background: #0b1220; color: #e6edf5; border: 1px solid #24344f; border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .5); display: none; flex-direction: column; overflow: hidden;
+  font: 14px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+#csc-panel.open { display: flex; }
+
+.csc-head {
+  display: flex; align-items: center; gap: 10px; padding: 13px 14px;
+  background: linear-gradient(135deg, rgba(56,189,248,.14), rgba(74,222,128,.1));
+  border-bottom: 1px solid #24344f;
+}
+.csc-head .csc-logo {
+  width: 32px; height: 32px; border-radius: 9px; flex: 0 0 32px; display: grid; place-items: center;
+  background: linear-gradient(135deg, #38bdf8, #4ade80); color: #04240f;
+}
+.csc-head .csc-logo svg { width: 18px; height: 18px; }
+.csc-head b { font-size: 14.5px; display: block; }
+.csc-head span { font-size: 11.5px; color: #9fb0c7; }
+.csc-close { margin-left: auto; background: none; border: none; color: #9fb0c7; font-size: 20px; cursor: pointer; line-height: 1; padding: 4px 6px; }
+.csc-close:hover { color: #e6edf5; }
+
+.csc-body { flex: 1; overflow-y: auto; padding: 14px; }
+.csc-body::-webkit-scrollbar { width: 6px; }
+.csc-body::-webkit-scrollbar-thumb { background: #24344f; border-radius: 3px; }
+
+.csc-msg { display: flex; gap: 8px; margin-bottom: 12px; }
+.csc-msg .csc-av {
+  flex: 0 0 26px; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; color: #04240f; background: linear-gradient(135deg, #38bdf8, #4ade80);
+}
+.csc-msg .csc-bubble {
+  background: #16233a; border: 1px solid #24344f; border-radius: 12px; padding: 9px 12px;
+  max-width: 84%; white-space: pre-wrap; word-break: break-word;
+}
+.csc-msg.me { flex-direction: row-reverse; }
+.csc-msg.me .csc-av { background: #2c3b56; color: #e6edf5; }
+.csc-msg.me .csc-bubble { background: rgba(56,189,248,.14); border-color: rgba(56,189,248,.35); }
+.csc-typing { display: inline-flex; gap: 4px; align-items: center; }
+.csc-typing i { width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; animation: csc-bounce 1.2s infinite; }
+.csc-typing i:nth-child(2) { animation-delay: .15s; }
+.csc-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes csc-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
+
+.csc-sugs { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 4px; }
+.csc-sug {
+  border: 1px solid rgba(56,189,248,.35); background: rgba(56,189,248,.1); color: #7dd3fc;
+  border-radius: 999px; padding: 6px 12px; font-size: 12.5px; cursor: pointer;
+}
+.csc-sug:hover { background: rgba(56,189,248,.2); }
+
+.csc-foot { border-top: 1px solid #24344f; padding: 10px 12px; background: #0d1626; }
+.csc-input-row { display: flex; gap: 8px; }
+#csc-in {
+  flex: 1; resize: none; height: 42px; max-height: 96px; background: #070d17; color: #e6edf5;
+  border: 1px solid #24344f; border-radius: 11px; padding: 11px 12px; font: inherit; outline: none;
+}
+#csc-in:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56,189,248,.14); }
+#csc-send {
+  flex: 0 0 auto; border: none; border-radius: 11px; padding: 0 16px; cursor: pointer; font-weight: 600;
+  background: linear-gradient(135deg, #4ade80, #38bdf8); color: #04240f;
+}
+#csc-send:disabled { opacity: .5; cursor: not-allowed; }
+.csc-tip { font-size: 11px; color: #6f82a0; margin-top: 7px; line-height: 1.5; }
+.csc-tip a { color: #7dd3fc; }
+
+@media (max-width: 480px) {
+  #csc-panel { right: 8px; left: 8px; bottom: 78px; width: auto; height: 68vh; }
+  #csc-btn { right: 14px; bottom: 14px; }
+}

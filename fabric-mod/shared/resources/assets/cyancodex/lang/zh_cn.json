@@ -1,0 +1,16 @@
+{
+  "cyancodex.key.open": "打开指令助手",
+  "cyancodex.key.category": "CyanCodex 指令助手",
+  "cyancodex.tab.library": "指令库",
+  "cyancodex.tab.generator": "生成器",
+  "cyancodex.tab.ai": "AI 助手",
+  "cyancodex.tab.favorite": "收藏",
+  "cyancodex.tab.settings": "设置",
+  "cyancodex.search": "搜索指令…",
+  "cyancodex.copy": "复制",
+  "cyancodex.copied": "已复制到剪贴板",
+  "cyancodex.run": "执行",
+  "cyancodex.loading": "加载中…",
+  "cyancodex.empty": "没有内容",
+  "cyancodex.error": "请求失败"
+}

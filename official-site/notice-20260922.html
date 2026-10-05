@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>服务器迁移完成报告 · CyanCodex 沧蓝工坊</title>
+<meta name="description" content="CyanCodex（沧蓝工坊）服务器迁移完成报告：2026-09-22 完成线路迁移，账号与数据状态、需要用户做什么、问题反馈渠道。">
+<meta name="theme-color" content="#0B1512">
+<link rel="canonical" href="https://cyancodex.cn/notice-20260922.html">
+<link rel="icon" href="assets/logo-app.png">
+<link rel="apple-touch-icon" href="assets/logo-app.png">
+<link rel="stylesheet" href="style.css?v=20260913c">
+<style>
+  .notice{position:relative;z-index:1;max-width:900px;margin:0 auto;padding:28px 20px 60px}
+  .notice h1{font-size:30px;line-height:1.3;margin:6px 0 8px}
+  .notice .sub{opacity:.72;font-size:14px;margin-bottom:22px}
+  .notice h2{font-size:19px;margin:28px 0 10px;color:var(--accent)}
+  .notice p,.notice li{line-height:1.85;font-size:15px}
+  .notice ul{padding-left:22px;margin:8px 0}
+  .card-n{background:color-mix(in srgb,var(--card) 92%,transparent);border:1px solid var(--line);border-radius:16px;padding:18px 20px;margin:14px 0}
+  .ok{color:#4ade80;font-weight:700}
+  .warn{color:#fbbf24;font-weight:700}
+  .bad{color:#f87171;font-weight:700}
+  table{width:100%;border-collapse:collapse;margin:10px 0;font-size:14.5px}
+  th,td{border:1px solid var(--line);padding:9px 11px;text-align:left}
+  th{background:color-mix(in srgb,var(--card) 85%,transparent);font-weight:600}
+  code{background:color-mix(in srgb,var(--card) 85%,transparent);padding:1px 6px;border-radius:6px;font-size:13.5px}
+  .tl{border-left:2px solid var(--line);padding-left:16px;margin:8px 0}
+  .tl div{margin:10px 0;font-size:14.5px}
+  .tl b{color:var(--accent)}
+  .quote{border-left:3px solid var(--accent);padding:2px 0 2px 14px;opacity:.9;font-size:14.5px}
+</style>
+</head>
+<body>
+<div class="bg-glow g1"></div>
+<div class="bg-glow g2"></div>
+
+<nav class="nav" id="nav">
+  <div class="nav-inner">
+    <a class="brand" href="index.html">
+      <img src="assets/logo-app.png" alt="CyanCodex" width="30" height="30">
+      <span>CyanCodex <span class="muted">沧蓝工坊</span></span>
+    </a>
+    <div class="nav-links">
+      <a href="index.html">首页</a>
+      <a href="index.html#download">下载</a>
+      <a href="guide.html">使用教程</a>
+      <a href="notice-20260922.html">迁移报告</a>
+    </div>
+  </div>
+</nav>
+
+<main class="notice">
+  <h1>服务器迁移完成报告</h1>
+  <p class="sub">2026 年 9 月 22 日 · 沧蓝工坊工作室</p>
+
+  <div class="card-n">
+    <p><b>一句话结论：</b>我们已经把 CyanCodex 的全部服务迁到了新的服务器线路上。<span class="ok">账号、积分、收藏、指令库数据完好</span>，App / 官网 / 网页版 / 管理端 / 审核端 / QQ 机器人全部恢复正常，连接速度比之前更快、更稳定。</p>
+  </div>
+
+  <h2>一、发生了什么</h2>
+  <div class="tl">
+    <div><b>9 月 21 日</b>　原主服务器机房故障停止服务，App、官网、机器人在一段时间内无法访问。</div>
+    <div><b>9 月 21 日 深夜 – 22 日</b>　我们把后端、数据库、网页版、官网、管理端静态页、安装包下载、QQ 机器人全部迁移到新服务器，并重新签发了 SSL 证书。</div>
+    <div><b>9 月 22 日</b>　全站恢复：域名解析指向新线路，App / 网页 / 官网 / 管理端 / 审核端 / 问卷站 / 源码站均已上线并逐一验证通过。</div>
+  </div>
+
+  <h2>二、对你的影响</h2>
+  <table>
+    <tr><th>项目</th><th>现状</th></tr>
+    <tr><td>账号、密码、邮箱</td><td class="ok">完好</td></tr>
+    <tr><td>积分、签到记录、收藏</td><td class="ok">完好</td></tr>
+    <tr><td>指令库（平台指令 + 你上传的指令）</td><td class="ok">完好</td></tr>
+    <tr><td>头像、指令附件等上传文件</td><td class="ok">完好</td></tr>
+    <tr><td>登录状态</td><td class="warn">可能需要重新登录一次</td></tr>
+    <tr><td>停机期间（约 9 天）的新数据</td><td class="bad">部分无法找回：期间的新注册、签到、积分变动、新上传的指令与反馈记录</td></tr>
+  </table>
+  <p class="quote">为什么会缺一部分数据？原服务器是机房侧停止服务、数据无法导出，我们只能用更早的一次完整备份恢复。这部分我们如实告知，不做隐瞒。</p>
+
+  <h2>三、你需要做什么</h2>
+  <ul>
+    <li><b>更新 App 到 v1.0.94</b>：打开 App 会看到更新提示，点「下载安装」即可；也可以到官网首页「下载」区重新下载安装包覆盖安装（账号数据不会丢）。</li>
+    <li><b>如果不更新</b>：老版本也能用（会自动走新线路），但首次连接会慢一些，建议更新。</li>
+    <li><b>遇到「登录已失效」</b>：重新登录一次即可，不是账号问题。</li>
+    <li><b>管理端 / 审核端用户</b>：请更新到 管理端 v1.0.20、审核端 v1.0.8（下载页可获取）。</li>
+    <li><b>如果打开网站仍显示打不开</b>：可能是你本地或运营商的 DNS 还缓存着旧地址，等几分钟或切换一下网络（手机流量 / 换个 WiFi）即可。</li>
+  </ul>
+
+  <h2>四、这次顺手升级了什么</h2>
+  <ul>
+    <li><b>线路更快更稳</b>：新的服务器带宽与路由更好，接口响应更快；App 直连新线路。</li>
+    <li><b>全站 HTTPS</b>：app.blueworkshop.top、cyancodex.cn、admin / test / git.cyancodex.cn、cc.blueworkshop.top 全部换上了新的 SSL 证书（自动续期）。</li>
+    <li><b>数据更安全</b>：新增每日自动数据库备份（保留最近 7 份），并加了服务器健康监控（每 5 分钟记录一次负载 / 内存 / 服务状态，异常可追溯）。</li>
+    <li><b>顺带修好</b>：官网两个 Java 版模组（Fabric）下载之前会 404，现在已恢复正常。</li>
+  </ul>
+
+  <h2>五、数据缺失怎么补</h2>
+  <p>如果你发现<b>积分少了、指令不见了、签到断了</b>，请通过下面任一渠道告诉我们，并尽量提供：<b>用户名 / 账号 ID</b>（App「我的 → 我的 ID 与登录设备」里能看到）、<b>大致时间</b>、<b>涉及的内容</b>。核实后我们会人工补回。</p>
+  <ul>
+    <li>App 内：<b>我的 → 反馈</b></li>
+    <li>官方 QQ 群：<b>1065025874</b></li>
+    <li>邮箱：<b>cyancodex@blueworkshop.top</b></li>
+  </ul>
+
+  <h2>六、说句谢谢</h2>
+  <p>这次故障给大家带来了不便，尤其是有几天完全连不上，我们非常抱歉。感谢每一位耐心等待、在群里帮我们确认状态的玩家。新的线路我们也会持续做备份与监控，尽量不再出现这种情况。</p>
+
+  <p class="sub" style="margin-top:26px">沧蓝工坊工作室 · 2026-09-22</p>
+
+  <div class="card-n" style="text-align:center">
+    <p style="margin:0 0 12px">已更新到最新版？直接回首页下载即可</p>
+    <a class="btn primary" href="index.html#download">前往下载最新版</a>
+    <a class="btn ghost" href="index.html" style="margin-left:8px">返回首页</a>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-links">
+      <a href="index.html">首页</a>
+      <a href="guide.html">使用教程</a>
+      <a href="privacy.html">隐私政策</a>
+      <a href="terms.html">用户协议</a>
+    </div>
+  </div>
+  <p class="muted small center">© 2026 沧蓝工坊工作室 · CyanCodex</p>
+</footer>
+
+<a class="back-top" id="back-top" href="#top" title="回到顶部">↑</a>
+<script src="app.js?v=20260913c"></script>
+</body>
+</html>

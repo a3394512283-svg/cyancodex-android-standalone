@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0E1512">
+<meta name="description" content="CyanCodex 我的世界（基岩版）指令助手网页版，由沧蓝工坊开发。指令库、T显生成器、聊天室、AI 助手、五子棋。">
+<!-- OG:START 微信/社交平台分享卡片(由 .deploy/og/inject_og.py 生成, 勿手改) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="CyanCodex 沧蓝工坊">
+<meta property="og:locale" content="zh_CN">
+<meta property="og:title" content="CyanCodex 网页版 · 我的世界指令助手">
+<meta property="og:description" content="免安装的网页版：指令库、T显生成器、AI 助手、聊天室与五子棋，打开浏览器就能用。">
+<meta property="og:url" content="https://app.blueworkshop.top/web/">
+<meta property="og:image" content="https://cyancodex.cn/assets/og-web.png">
+<meta property="og:image:width" content="478">
+<meta property="og:image:height" content="478">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:alt" content="CyanCodex 网页版 · 我的世界指令助手">
+<!-- OG:END -->
+<title>CyanCodex · 我的世界指令助手</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='15' fill='%230E1512'/%3E%3Crect x='7' y='7' width='50' height='50' rx='10' fill='none' stroke='%234ADE80' stroke-width='2'/%3E%3Ctext x='32' y='43' font-size='28' text-anchor='middle' fill='%234ADE80' font-family='Arial,sans-serif' font-weight='bold'%3EC%3C/text%3E%3C/svg%3E">
+<link rel="icon" href="icon-round.png?v=2">
+<link rel="apple-touch-icon" href="icon-round.png?v=2">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <!-- 全局液态玻璃光斑背景 (动画) -->
+  <div class="bg-glow bg-glow-1"></div>
+  <div class="bg-glow bg-glow-2"></div>
+  <div class="bg-glow bg-glow-3"></div>
+  <div class="bg-glow bg-glow-4"></div>
+
+
+  <!-- ===== 登录页 (App 同款: 光斑背景 + 液态玻璃卡片 + 真实图标) ===== -->
+  <div id="view-login" class="view login-view">
+    <div class="auth-box glass">
+      <button class="theme-btn theme-btn-login" onclick="cycleTheme()" title="切换主题" id="theme-btn-login">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path id="theme-ico-login" d=""/></svg>
+      </button>
+      <img class="auth-logo-img" src="logo-usericon.png" alt="CyanCodex">
+      <h1 class="auth-title">CyanCodex</h1>
+      <p class="auth-sub">沧蓝工坊 · 我的世界指令助手</p>
+      <div class="auth-tabs glass-tabs">
+        <button class="auth-tab active" data-tab="login">登录</button>
+        <button class="auth-tab" data-tab="register">注册</button>
+      </div>
+
+      <!-- 登录表单 -->
+      <div id="form-login" class="auth-form">
+        <div class="field glass-input">
+          <input id="login-ident" placeholder="用户名 / 邮箱" autocomplete="username">
+        </div>
+        <div class="field glass-input">
+          <input id="login-pass" type="password" placeholder="密码" autocomplete="current-password">
+        </div>
+        <button class="btn primary block glass-btn" onclick="doLogin()">登录</button>
+        <p class="auth-hint err" id="login-err"></p>
+      </div>
+
+      <!-- 注册表单 -->
+      <div id="form-register" class="auth-form" style="display:none">
+        <div class="field glass-input">
+          <input id="reg-user" placeholder="用户名 (2-20位, 中文/字母/数字/下划线)">
+        </div>
+        <div class="field glass-input">
+          <input id="reg-nick" placeholder="昵称 (可选)">
+        </div>
+        <div class="field glass-input">
+          <input id="reg-email" type="email" placeholder="邮箱">
+        </div>
+        <div class="field glass-input">
+          <input id="reg-pass" type="password" placeholder="密码 (至少6位)">
+        </div>
+        <div class="field-row">
+          <div class="field grow glass-input">
+            <input id="reg-captcha" placeholder="图形验证码">
+          </div>
+          <img id="reg-captcha-img" class="captcha-img" onclick="loadCaptcha()" title="点击刷新" alt="验证码">
+        </div>
+        <div class="field-row">
+          <div class="field grow glass-input">
+            <input id="reg-emailcode" placeholder="邮箱验证码">
+          </div>
+          <button class="btn glass-btn" id="btn-send-email" onclick="sendEmailCode()">发送验证码</button>
+        </div>
+        <button class="btn primary block glass-btn" onclick="doRegister()">注册并登录</button>
+        <p class="auth-hint">注册即送 100 积分</p>
+        <p class="auth-hint err" id="reg-err"></p>
+      </div>
+
+      <p class="auth-foot">支持用户名或邮箱登录 · 未注册请先注册</p>
+      <p class="auth-foot">继续即表示同意 <a href="https://cyancodex.cn/terms.html" target="_blank" rel="noopener">《用户协议》</a> 与 <a href="https://cyancodex.cn/privacy.html" target="_blank" rel="noopener">《隐私政策》</a></p>
+      <p class="auth-foot">加入我们的 QQ 群 1065025874，一起交流指令</p>
+    </div>
+  </div>
+
+  <!-- ===== 主界面 ===== -->
+  <div id="view-main" class="view" style="display:none">
+    <header class="topbar">
+      <div class="topbar-left">
+        <img class="mini-logo-img" src="logo-usericon.png" alt="CyanCodex" onclick="showPage('home')">
+        <span class="topbar-title" onclick="showPage('home')">CyanCodex</span>
+      </div>
+      <div class="topbar-right">
+        <span class="points-badge" id="points-badge">0 积分</span>
+        <button class="theme-btn" onclick="cycleTheme()" title="切换主题" id="theme-btn-main">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path id="theme-ico-main" d=""/></svg>
+        </button>
+        <button class="icon-btn" onclick="showPage('messages')" title="站内信">信</button>
+        <div class="avatar" id="top-avatar" onclick="showPage('profile')"></div>
+      </div>
+    </header>
+
+    <main id="main-content"></main>
+
+    <nav class="bottom-nav">
+      <button class="nav-item active" data-page="home" onclick="showPage('home')"><span class="nav-ico">首</span><span class="nav-txt">首页</span></button>
+      <button class="nav-item" data-page="library" onclick="showPage('library')"><span class="nav-ico">库</span><span class="nav-txt">指令库</span></button>
+      <button class="nav-item" data-page="chat" onclick="showPage('chat')"><span class="nav-ico">聊</span><span class="nav-txt">聊天室</span></button>
+      <button class="nav-item" data-page="tools" onclick="showPage('tools')"><span class="nav-ico">具</span><span class="nav-txt">生成器</span></button>
+      <button class="nav-item" data-page="more" onclick="showPage('more')"><span class="nav-ico">更</span><span class="nav-txt">更多</span></button>
+    </nav>
+  </div>
+
+</div>
+<script src="api.js"></script>
+<script src="generators.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

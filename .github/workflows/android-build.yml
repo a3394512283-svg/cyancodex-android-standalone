@@ -1,0 +1,63 @@
+name: Build Android APK
+
+# 零本地 SDK 构建: GitHub 托管 runner 自带 Android SDK / JDK, 并可直接访问 Maven Central。
+# 用法: 把本项目推到 GitHub -> Actions 页签 -> "Build Android APK" -> Run workflow
+#       构建完成后在该次运行的 Artifacts 里下载 APK。
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # GitHub 的 ubuntu runner 已预装 Android SDK(ANDROID_HOME 已设), 无需再 setup-android
+      # (android-actions/setup-android 会执行已废弃的 `sdkmanager tools` 而失败)
+      - name: Show Android SDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls "$ANDROID_HOME/platforms" 2>/dev/null || true
+          ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
+          ls "$ANDROID_HOME/licenses" 2>/dev/null || true
+
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.5.0'
+
+      # 兼容两种仓库布局: 根目录含 android/ , 或 android 本身就是根目录
+      - name: Locate gradle project
+        id: loc
+        run: |
+          if [ -f android/settings.gradle.kts ]; then
+            echo "dir=android" >> "$GITHUB_OUTPUT"
+          else
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          fi
+
+      # gradle.properties 里的 org.gradle.java.home 指向 Windows 的 Android Studio JBR, Linux 上会报错, 删掉即可
+      - name: Remove Windows-only org.gradle.java.home
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: sed -i '/org.gradle.java.home/d' gradle.properties
+
+      - name: Build debug APK
+        working-directory: ${{ steps.loc.outputs.dir }}
+        run: gradle :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: CyanCodex-debug-apk
+          path: ${{ steps.loc.outputs.dir }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

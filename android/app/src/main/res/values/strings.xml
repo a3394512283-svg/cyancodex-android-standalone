@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CyanCodex</string>
+    <string name="ime_name">CyanCodex 指令输入法</string>
+    <string name="ime_settings">CyanCodex 输入法设置</string>
+</resources>

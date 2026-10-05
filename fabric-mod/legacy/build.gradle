@@ -1,0 +1,89 @@
+// CyanCodex 《我的世界》Java 版 Fabric 模组 · 1.20.1 ~ 1.21.8 多版本构建
+// 用法：
+//   gradlew.bat build                                -> 默认 1.20.1
+//   gradlew.bat build -Pminecraft_version=1.21.1
+//   gradlew.bat build -Pminecraft_version=1.21.8
+// 源码来自 ../shared（只用各版本交集 API），产物名带 MC 版本后缀，方便玩家对号入座。
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version '1.17.20'
+}
+
+// ==================== 版本矩阵 ====================
+// 说明：Minecraft 26.1 起官方移除混淆，26.2 用另一套工程（../modern，插件为 net.fabricmc.fabric-loom）
+def mcVersions = [
+        '1.20.1': [loader: '0.16.14', api: '0.92.12+1.20.1', java: 17],
+        '1.21.1': [loader: '0.16.14', api: '0.116.17+1.21.1', java: 21],
+        '1.21.8': [loader: '0.16.14', api: '0.136.1+1.21.8', java: 21]
+]
+def mc = project.findProperty('minecraft_version') ?: '1.20.1'
+if (!mcVersions.containsKey(mc)) {
+    throw new GradleException("不支持的 MC 版本：${mc}（可选：${mcVersions.keySet().join(' / ')}）")
+}
+def target = mcVersions[mc]
+
+// 通用包支持：编译仍按上面某个具体版本进行，但把 fabric.mod.json 里的 MC 依赖放宽成范围。
+// 已用 .deploy/migrate/check_crossver3.py 静态验证：引用到的 MC 中间名在目标版本全部存在。
+def mcRange = project.findProperty('mc_range') ?: mc
+def suffix = project.findProperty('artifact_suffix') ?: mc
+
+version = "${project.mod_version}+${suffix}"
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.fabricmc.net/' }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${mc}"
+    // 统一使用 Mojang 官方映射：与 26.2（官方已去混淆）保持同名，跨版本共享源码成本最低
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${target.loader}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${target.api}"
+}
+
+// ==================== 共享源码 ====================
+sourceSets {
+    main {
+        java.srcDirs = ['../shared/java', 'src/main/java']
+        resources.srcDirs = ['../shared/resources', 'src/main/resources']
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "mc", mcRange
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version, "mc": mcRange
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = target.java
+}
+
+java {
+    withSourcesJar()
+}
+
+// 产物命名：cyancodex-fabric-1.0.0+1.20.1.jar（通用包为 +1.20.1-1.21.8.jar）
+tasks.named('remapJar') {
+    archiveFileName = "${project.archives_base_name}-${project.mod_version}+${suffix}.jar"
+}
+
+// 构建完成后自动把 jar 复制到上层目录（即 fabric-mod/，方便直接拿包测试）
+tasks.register('publishToRoot', Copy) {
+    dependsOn tasks.named('remapJar')
+    from tasks.named('remapJar').flatMap { it.archiveFile }
+    into rootProject.projectDir.parentFile
+    // 目标目录是项目根（含子项目与源码），Gradle 无法做状态跟踪，这里显式声明不跟踪
+    doNotTrackState("目标目录为项目根目录，包含源码与子项目")
+}
+tasks.named('build') {
+    finalizedBy 'publishToRoot'
+}

@@ -1,0 +1,69 @@
+// CyanCodex 《我的世界》Java 版 Fabric 模组 · Minecraft 26.2 分支
+//
+// 为什么单独一个工程：
+//   Minecraft 26.1 起官方取消了代码混淆，Fabric 也随之停止维护 Yarn。
+//   26.x 必须使用非 remap 的 Loom 插件（net.fabricmc.fabric-loom）且不需要 mappings。
+//   源码仍与 ../shared 共用（官方名与 Mojang 映射同名），差异代码放在本工程的 src 下。
+plugins {
+    id 'net.fabricmc.fabric-loom' version '1.17.20'
+}
+
+version = "${project.mod_version}+${project.minecraft_version}"
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.fabricmc.net/' }
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    // 26.1+ 官方已去混淆：不需要 mappings，也不需要 remap，
+    // 因此非 remap 的 Loom 没有 modImplementation 配置，直接用 implementation。
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+}
+
+sourceSets {
+    main {
+        java.srcDirs = ['../shared/java', 'src/main/java']
+        resources.srcDirs = ['../shared/resources', 'src/main/resources']
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    inputs.property "mc", project.minecraft_version
+    filesMatching("fabric.mod.json") {
+        expand "version": project.version, "mc": project.minecraft_version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    // Minecraft 26.2 的类文件是 Java 25（class file 69.0），必须用 JDK 25 编译
+    options.release = 25
+}
+
+java {
+    withSourcesJar()
+}
+
+tasks.named('jar') {
+    archiveFileName = "${project.archives_base_name}-${project.mod_version}+${project.minecraft_version}.jar"
+}
+
+// 构建完成后把 jar 复制到项目根目录
+tasks.register('publishToRoot', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into rootProject.projectDir.parentFile
+    doNotTrackState("目标目录为项目根目录，包含源码与子项目")
+}
+tasks.named('build') {
+    finalizedBy 'publishToRoot'
+}
