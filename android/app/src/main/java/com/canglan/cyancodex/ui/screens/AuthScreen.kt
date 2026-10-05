@@ -103,10 +103,14 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
      *  ⛔ **全程静默**: 不给任何 Toast / 提示 / 视觉反馈。
      *     2026-10-05 用户明确要求「打开面板无须提示，调试用的不用给提示」——
      *     这是调试入口, 提示会暴露它的存在, 就失去"隐藏"的意义了。
-     *  ⛔ 调试模式关着时**直接不计数** —— 入口要真的消失, 不是藏起来。
+     *  ⛔ **不受调试模式守卫** —— 这一点 2026-10-05 被实机反馈纠正过一次:
+     *     原实现写了「调试模式关着时直接 return」, 结果**新装 App 直接死锁** ——
+     *     登录页进不去设置页 ⇒ 用户开不了调试模式; 连点又被守卫拦下 ⇒ 也没有别的路径导入登录态。
+     *     连点是**后门钥匙**, 不是「入口」: 它全程无视觉反馈, 本身就是隐藏的。
+     *     需要跟着调试模式联动显隐的, 是登录页那个**可见的**「导入登录态」按钮行
+     *     (见下面 `if (cookieEntryOn) { ... }`)。
      */
     fun onIconTap() {
-        if (!cookieEntryOn) return
         val now = System.currentTimeMillis()
         tapCount = if (now - lastTapAt > 1200L) 1 else tapCount + 1
         lastTapAt = now
@@ -337,13 +341,13 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
                     // ★ 快捷入口: 连点 10 下打开 cookie 注入框 (2026-10-05)。
                     //   用 clickable 而非 pointerInput —— 与关于页版本号那个入口同一套写法,
                     //   行为可预期 (ripple 关掉, 免得暴露"这里可以点")。
-                    //   ⛔ 调试模式关着时**整块不挂 clickable** —— 连点也点不开 (入口真消失)。
-                    .then(
-                        if (cookieEntryOn) Modifier.clickable(
-                            interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                            indication = null,
-                        ) { onIconTap() } else Modifier
-                    ),
+                    //   ⛔ **始终挂 clickable** —— 见 onIconTap 的注释: 连点是后门钥匙,
+                    //     不能跟着调试模式联动 (否则新装 App 死锁)。
+                    //     无 ripple、无 Toast, 不暴露"这里可以点"。
+                    .clickable(
+                        interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                        indication = null,
+                    ) { onIconTap() },
             )
             Text("CyanCodex", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Text("沧蓝工坊 · 我的世界指令助手", fontSize = 13.sp, color = Color.White.copy(alpha = 0.7f))

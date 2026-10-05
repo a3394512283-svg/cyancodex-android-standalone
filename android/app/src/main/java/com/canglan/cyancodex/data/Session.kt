@@ -153,6 +153,22 @@ object Session {
     }
 
     /**
+     * ★★ **清除全部登录凭证** —— 令牌 + Cookie 一起清（2026-10-05 新增）。
+     *
+     * ## 为什么需要它
+     * 用户原话:「清除登录态没用」。根因是调试面板那个按钮写的是 `enabled = hasCookie`,
+     * 而**账号密码登录拿到的只有令牌、没有 Cookie**（服务器不下发 `Set-Cookie`,
+     * 见 [exportLoginState] 的说明）→ 按钮一直是灰的, 点不动。
+     * 用户想清的是「登录态」, 不是「Cookie」。
+     *
+     * 只清凭证、**保留 `user_json`** —— 调试面板是诊断工具, 清完还要接着测,
+     * 不该把人立刻踢回登录页。真需要登出时走 [logout]。
+     */
+    fun clearLoginState() {
+        sp.edit().remove("token_enc").remove("cookie_enc").apply()
+    }
+
+    /**
      * 把用户粘贴的 cookie 洗成**请求头能用的形态**。
      *
      * 用户粘贴的来源五花八门, 这几种都得吃下:

@@ -190,7 +190,7 @@ private fun MasterSwitchCard(ctx: Context, on: Boolean, onChange: (Boolean) -> U
  * 1. **导入** —— 粘 token 或 cookie, 保存后**立即换登录态**(调 `me()` 真验, 不是假装成功);
  * 2. **状态** —— 令牌/Cookie 各自有没有、多少字符（**永不显示原文**, 除非用户点导出）;
  * 3. **导出** —— 点了才把登录态拷进剪贴板（换设备用）;
- * 4. **清除** —— 只清 Cookie，不动令牌/用户信息。
+ * 4. **清除** —— 令牌 + Cookie 一起清（用户资料保留）。
  */
 @Composable
 private fun LoginStateTab(ctx: Context) {
@@ -270,19 +270,22 @@ private fun LoginStateTab(ctx: Context) {
                     }
                     GlassActionButton(
                         onClick = {
-                            Session.clearCookie()
+                            Session.clearLoginState()
                             ApiClient.reset()
                             tick++
                             result = ""
-                            DebugStore.log("Debug", "Cookie 已清除")
-                            Toast.makeText(ctx, "已清除注入的 Cookie（令牌不受影响）", Toast.LENGTH_SHORT).show()
+                            DebugStore.log("Debug", "登录态已清除")
+                            Toast.makeText(ctx, "已清除登录态（令牌 + Cookie）", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = hasCookie && !busy,
+                        // ⛔ 别写成 enabled = hasCookie —— 账号密码登录**只有令牌没有 Cookie**,
+                        //    那样按钮永远是灰的, 用户点了没反应 (2026-10-05 实测报障:
+                        //    「清除登录态没用」, 真因就是这里, 不是功能坏了)。
+                        enabled = hasAny && !busy,
                     ) {
                         Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("清除 Cookie")
+                        Text("清除登录态")
                     }
                 }
                 if (result.isNotBlank()) {
@@ -331,7 +334,7 @@ private fun LoginStateTab(ctx: Context) {
                     // ★ 2026-10-05: 用户报"导出不了"。真因是**旧版只导 Cookie, 而服务器不下发
                     //   Set-Cookie** → 密码登录时永远是空串。现在改为导整个登录态, 并且
                     //   按钮**永远可点**, 没内容就用 Toast 说清为什么。
-                    "「清除 Cookie」只清 Cookie，不影响令牌与用户信息。",
+                    "「清除登录态」会同时清掉令牌与 Cookie（用户资料保留）。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
 
@@ -359,18 +362,19 @@ private fun LoginStateTab(ctx: Context) {
                     }
                     GlassActionButton(
                         onClick = {
-                            Session.clearCookie()
+                            Session.clearLoginState()
                             ApiClient.reset()
                             tick++
-                            DebugStore.log("Debug", "Cookie 已清除")
-                            Toast.makeText(ctx, "已清除注入的 Cookie（令牌不受影响）", Toast.LENGTH_SHORT).show()
+                            DebugStore.log("Debug", "登录态已清除")
+                            Toast.makeText(ctx, "已清除登录态（令牌 + Cookie）", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = hasCookie,
+                        // 同上: 判 hasAny 而不是 hasCookie —— 密码登录场景下根本没有 Cookie。
+                        enabled = hasAny,
                     ) {
                         Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("清除 Cookie")
+                        Text("清除登录态")
                     }
                 }
             }
