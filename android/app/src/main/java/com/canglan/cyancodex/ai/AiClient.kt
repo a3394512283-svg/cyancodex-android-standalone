@@ -4,6 +4,7 @@ import android.os.SystemClock
 import com.canglan.cyancodex.data.AiToolEvent
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.UiMsg
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
@@ -151,12 +152,35 @@ object AiClient {
 - ⚠️ 本次**没有开启语法核对工具**, 所以输出指令前请**自己逐条仔细检查语法与方块/物品 ID**（小写英文 ID、无非法字符、无多余的 _block 后缀）。
 - 简单问候、常识问答、闲聊**不要**调工具, 直接回答。"""
 
+    /**
+     * ★ **「先联网搜索」提示段** (2026-10-05) —— 用户开了「智能搜索」时追加。
+     *
+     * 用户原话:「进行任务时先进行查询」。他要的是 **DeepSeek 那种"先搜后答"**:
+     * 不是"等模型自己想起来才搜", 而是**把搜索固定成回答前的第一步**。
+     *
+     * 为什么要写死这一句: 模型默认倾向"凭已有知识直接答", 只在它**自认为**不确定时才调工具。
+     * 而时效性/版本相关的问题(网易版某个方块 ID 改没改、某条指令在新版本还行不行),
+     * 模型的"自信"恰恰是最不可靠的。明说"先搜一次"能把这条路径变成默认路径。
+     *
+     * ⚠️ 留了例外口子: 纯寒暄/翻译/写代码这类**不需要外部信息**的问题直接答 ——
+     *   不然用户说一句"你好"也要先烧一次搜索, 又慢又费。
+     */
+    private const val SEARCH_FIRST_PROMPT = """
+
+【智能搜索 · 先查后答】
+- 用户开启了智能搜索。凡是**事实性 / 时效性 / 版本相关**的问题，**回答前先调用 web_search 联网搜索一次**（角度不够时可以换关键词多搜几组），拿到资料后再作答，不要凭记忆直接下结论。
+  （若本轮**没有**可用的搜索工具，就直接凭已有知识回答并说明未联网。）
+- 回答里引用到搜索结果时标出来源编号（如 [1]）。
+- 若搜索接口超时或没有取到资料，**如实说明"未查到"**，再用已有知识给出通用做法，**不要编造来源**。
+- 纯寒暄、翻译、写作、纯代码改写这类不需要外部信息的问题，直接回答即可，不必搜索。"""
+
     /** 组装系统提示词: 基础提示 + 网易版要点 + 本次问题相关的指令语法自查 */
     private fun buildSystemPrompt(
         userText: String,
         extra: String = "",
         cmdExpert: Boolean = false,
         syntaxCheck: Boolean = true,
+        searchTool: Boolean = false,
     ): String {
         val hit = NetEaseWiki.lookup(userText)
         val sb = StringBuilder(SYSTEM_PROMPT)
@@ -166,6 +190,8 @@ object AiClient {
         // ★ 2026-10-05: 把「核语法」那段的措辞按开关分流 —— 关掉核对工具时不能再叫模型
         //   去"调 check_command 核对", 那个工具压根没挂, 模型会一直试。
         if (cmdExpert) sb.append(if (syntaxCheck) TOOLS_PROMPT else TOOLS_PROMPT_NO_CHECK)
+        // ★ 2026-10-05: 「先查后答」—— 开了智能搜索就把"先搜一次"写进系统提示
+        if (searchTool) sb.append(SEARCH_FIRST_PROMPT)
         if (extra.isNotEmpty()) sb.append(extra)
         return sb.toString()
     }
@@ -424,6 +450,28 @@ object AiClient {
      *
      *                ⚠️ 同样**跑在 IO 线程**。UI 侧见 `AiTaskRunner` 的 `upsertEvent`。
      *                ⚠️ 不传它就退化成只有 [onEvent] 的旧行为, 不会崩。
+     * @param onThinkDelta ★ **思考增量回调** (2026-10-05)。与 [onDelta] 对称, 但吐的是
+     *               `reasoning_content` / `reasoning` 的**推理正文增量**。
+     *
+     *               用户要的是"像 WorkBuddy / ima 一样**展示中间思考的内容**" —— 光有
+     *               [onEvent] 的一句话状态不够, 得把模型真实在想的字**边想边流出来**。
+     *               流式通道逐片回调; 非流式通道(网关忽略 `stream`)拿不到增量, 就在
+     *               读完那一刻**整段回调一次**(见 [chat] 里 `rsn` 那两行)。
+     *
+     *               ⚠️ 每轮开始前 [onStreamStart] 会同时被调用方用来清空**正文与思考**两个缓冲,
+     *                  否则上一轮的半截思考会和这一轮粘起来。
+     *               ⚠️ 同样**跑在 IO 线程**, 调用方要自己切主线程。
+     *               ⚠️ 上游不返回思考内容时**一次都不会回调** —— 别指望它一定有。
+     * @param shouldStop ★ **协作式停止** (2026-10-05)。用户点了「停止生成」时, 调用方把
+     *               这个回调翻成 `true`, 本函数会在**下一次检查点**抛
+     *               [CancellationException] 退出 —— 为什么要这个:
+     *
+     *               本函数内部是**阻塞**的 OkHttp `execute()` 与逐行 `readLine()`,
+     *               它们**不响应协程取消**。光靠 `job.cancel()` 要等当前那次 HTTP
+     *               响应读完才生效 —— 用户点了停止却还看字往外蹦, 会以为按钮坏了。
+     *               所以在读流循环里插一个检查点, 才能做到"点了立刻停"。
+     *
+     *               ⚠️ 不传它 = 只能靠 `job.cancel()`, 停止会有延迟(旧行为)。
      */
     suspend fun chat(
         history: List<UiMsg>,
@@ -441,6 +489,8 @@ object AiClient {
         onDelta: ((String) -> Unit)? = null,
         onEvent: ((String) -> Unit)? = null,
         onToolEvent: ((com.canglan.cyancodex.data.AiToolEvent) -> Unit)? = null,
+        onThinkDelta: ((String) -> Unit)? = null,
+        shouldStop: (() -> Boolean)? = null,
     ): ChatResult = withContext(Dispatchers.IO) {
         val b = normalizeAiBase(base)
         val m = model.trim().ifBlank { "gpt-4o-mini" }
@@ -458,7 +508,7 @@ object AiClient {
         val msgs = JSONArray().apply {
             put(
                 JSONObject().put("role", "system")
-                    .put("content", buildSystemPrompt(userText, searchContext, cmdExpert, syntaxCheck))
+                    .put("content", buildSystemPrompt(userText, searchContext, cmdExpert, syntaxCheck, searchTool))
             )
             real.forEach { put(JSONObject().put("role", it.role).put("content", it.content)) }
         }
@@ -476,7 +526,7 @@ object AiClient {
          * 流式是否还开着。上游用 400/422 拒掉 `stream` 之后就摘掉它 ——
          * 别每轮都白试一次, 也别让"不支持流式"这件事表现成"请求失败"。
          */
-        var streamOn = onDelta != null
+        var streamOn = onDelta != null || onThinkDelta != null
         val queries = ArrayList<String>()
         val wikiQueries = ArrayList<String>()
         var checkCount = 0
@@ -588,9 +638,13 @@ object AiClient {
         var round = 0
         while (round < roundLimit) {
             round++
+            // ★ 用户点了「停止生成」→ 立刻退出 (2026-10-05)。检查点放在**每轮开头**:
+            //   工具执行完、下一轮请求发出之前, 是唯一"没卡在阻塞 IO 上"的自然位置。
+            if (shouldStop?.invoke() == true) throw CancellationException("已停止生成")
             // ★ 每一轮开始前清空调用方的流式缓冲: 上一轮若吐了半截正文又被判为"还要调工具",
             //   那半截内容已经作废 —— 不清掉会和最终答案粘成一段谁也看不懂的东西。
-            if (onDelta != null) onStreamStart?.invoke()
+            //   ⚠️ 调用方在 [onStreamStart] 里**正文与思考两个缓冲都要清** (见 onThinkDelta 注释)。
+            if (onDelta != null || onThinkDelta != null) onStreamStart?.invoke()
 
             val resp = sendOnce()
             if (!resp.isSuccessful) {
@@ -603,7 +657,7 @@ object AiClient {
             //   有的网关把 stream 字段当耳旁风, 照旧回一整段 JSON。按实际形态解析才不会炸。
             val subtype = respBody.contentType()?.subtype.orEmpty()
             val msg = if (subtype.equals("event-stream", ignoreCase = true)) {
-                readStreamMessage(respBody, onDelta)
+                readStreamMessage(respBody, onDelta, onThinkDelta, shouldStop)
             } else {
                 val text = respBody.string()
                 JSONObject(text).optJSONArray("choices")?.optJSONObject(0)?.optJSONObject("message")
@@ -613,7 +667,14 @@ object AiClient {
             // 多轮思考要**拼起来** —— 只看最后一轮的话, 前面几轮的推理过程就丢了,
             // 用户看到"已思考"点开却是空的。
             val rsn = readReasoning(msg)
-            if (rsn.isNotBlank()) thinkAll.append(rsn)
+            if (rsn.isNotBlank()) {
+                thinkAll.append(rsn)
+                // ★ 非流式通道(网关忽略 `stream`, 或流式被 400/422 摘掉)拿不到增量,
+                //   就在读到整段思考的这一刻**整段回调一次** —— 上层照样能显示推理正文,
+                //   只是不会逐字流出来而已。流式通道下这里**不重复回调**: 增量已在
+                //   [readStreamMessage] 里逐片吐过了, 再吐一遍会看到思考内容翻倍。
+                if (subtype != "event-stream") onThinkDelta?.invoke(rsn)
+            }
 
             val calls = msg.optJSONArray("tool_calls")
             if (calls == null || calls.length() == 0) {
@@ -872,7 +933,12 @@ object AiClient {
      * ⚠️ 有些实现**不带 `index`**, 用数组下标兜底。
      * ⚠️ 上游也可能**把错误走 SSE 吐出来**(HTTP 200 + `{"error":{…}}`), 必须显式判。
      */
-    private fun readStreamMessage(body: ResponseBody, onDelta: ((String) -> Unit)?): JSONObject {
+    private fun readStreamMessage(
+        body: ResponseBody,
+        onDelta: ((String) -> Unit)?,
+        onThinkDelta: ((String) -> Unit)? = null,
+        shouldStop: (() -> Boolean)? = null,
+    ): JSONObject {
         val content = StringBuilder()
         val reasoning = StringBuilder()
         // index -> {id, type, function:{name, arguments}}
@@ -880,6 +946,9 @@ object AiClient {
 
         body.charStream().buffered().use { br ->
             while (true) {
+                // ★ 协作式停止检查点 (2026-10-05): 逐行读是**阻塞**的, 不插这个检查点
+                //   就只能等整段读完才停 —— 用户会以为"停止"按钮没反应。
+                if (shouldStop?.invoke() == true) throw CancellationException("已停止生成")
                 val line = br.readLine() ?: break
                 // 空行 = 事件分隔; `event:` / `id:` / `: 注释` 这些字段我们都不需要
                 if (line.isEmpty() || !line.startsWith("data:")) continue
@@ -902,8 +971,13 @@ object AiClient {
                     onDelta?.invoke(c)
                 }
                 // ---- 思考增量 (字段名同非流式, 见 [readReasoning]) ----
+                // ★ 2026-10-05: 边收边吐 —— 与正文增量同理。上层据此把"正在思考"的
+                //   推理正文**实时**画出来(像 WorkBuddy/ima 那样), 而不是等整轮结束才显示。
                 val rc = jsonStr(d, "reasoning_content").ifBlank { jsonStr(d, "reasoning") }
-                if (rc.isNotEmpty()) reasoning.append(rc)
+                if (rc.isNotEmpty()) {
+                    reasoning.append(rc)
+                    onThinkDelta?.invoke(rc)
+                }
                 // ---- 工具调用分片 ----
                 val arr = d.optJSONArray("tool_calls") ?: continue
                 for (i in 0 until arr.length()) {

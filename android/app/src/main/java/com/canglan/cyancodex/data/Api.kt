@@ -435,19 +435,30 @@ object ApiClient {
         val authInterceptor = Interceptor { chain ->
             val req = chain.request()
             val b = req.newBuilder()
-            Session.token?.let { b.header("Authorization", "Bearer $it") }
+            // ⛔ Cookie 登录态下**不发** Authorization (2026-10-05): token 是哨兵值
+            //   [Session.COOKIE_TOKEN], 它不是真凭证 —— 发出去服务端 401, 再触发下面的
+            //   authFailInterceptor 把会话清掉(表现为"刚用 cookie 登录就掉线")。
+            //   这条通道本来就只有 Cookie 一个凭证, 不带 Authorization 才是对的。
+            val tk = Session.token
+            if (tk != null && tk != Session.COOKIE_TOKEN) b.header("Authorization", "Bearer $tk")
             b.header("Accept", "application/json")
             // ★★ 手动注入的 Cookie (隐藏入口, 2026-10-05) —— 与 Authorization 并行, 两者都带。
             //   ⛔⛔ **只给自己域名**。这是硬约束: Retrofit 的 baseUrl 是自家服务器, 但
             //      Api 客户端**只发往自家服务器**(AI 直连走的是 AiSearch/AiClient 各自的 OkHttp,
             //      不经过这里), 所以这里天然安全。但为了防将来有人把这个 client 复用出去,
             //      仍然显式判一次 host —— 防御性写法, 别删。
-            //   ★★ 2026-10-05 再加一道: 必须 `DebugStore.cookieEnabled` —— 调试面板总开关(仿开发者选项)
+            // ★★ 2026-10-05 再加一道: 必须 `DebugStore.cookieEnabled` —— 调试面板总开关(仿开发者选项)
             //      关掉后 cookie **不再注入**。用户要的"关闭开关"要能真的把这条能力关死,
             //      而不是只藏起 UI。判 cookieEnabled(= active = 解锁 且 总开关开着):
             //      "开调试模式就开" —— 与用户在登录页看到入口的条件**完全一致**, 不会出现
             //      "入口看得见却注不进去"这种自相矛盾。
-            if (DebugStore.cookieEnabled) {
+            //
+            // ★★ 例外: **当前会话就是 Cookie 登录态时, 关掉调试模式也照样注入** (2026-10-05)。
+            //      原因: 这时 cookie 已经是用户的**登录凭证**(token 只是哨兵值),
+            //      关调试模式把它掐掉 = 把用户当场踢下线, 而且因为哨兵 token 非空,
+            //      界面还会显示"已登录"却所有请求 401 —— 最糟的一种状态。
+            //      "关调试就不注入"针对的是**调试注入**这个动作, 不是"注销我的登录"。
+            if (DebugStore.cookieEnabled || Session.token == Session.COOKIE_TOKEN) {
                 Session.cookie?.let { ck ->
                     val host = req.url.host.lowercase()
                     if (isOwnHost(host)) b.header("Cookie", ck)

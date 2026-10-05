@@ -381,6 +381,116 @@ data class UiMsg(
      * ⚠️ 老会话 JSON 里没这个键 → Gson 反射成 **null**, 读取处一律 `.orEmpty()`。
      */
     val attachments: List<Attachment> = emptyList(),
+    /**
+     * ★★ **本轮 AI 调用工具 / 复查的完整过程记录** (2026-10-05)。
+     *
+     * 用户原话:「我的过程指的是像 workbuddy 或者 ima 一样**展示中间思考的内容和调用的工具**」。
+     * 上面那几个 `searchQueries` / `wikiQueries` / `checkCount` 只是**汇总**(一行关键词列表),
+     * 而这里存的是**逐条**的 [AiToolEvent] —— 带状态(成功/失败)、耗时、并发分组。
+     *
+     * ## 为什么要落盘
+     * 流式期间时间线是**实时**画出来的(见 `AiTaskRunner.toolEvents`), 但任务一收尾那份内存状态
+     * 就被清了 —— 回答落地后, 用户回头看这条消息, "刚才查过什么、哪条超时了"全没了, 只剩
+     * 一行干巴巴的关键词。把这份记录随消息一起存下来, 重新打开会话也能折叠展开查看。
+     *
+     * ⚠️ 老会话 JSON 里没这个键 → Gson 反射成 **null**, 读取处一律 `.orEmpty()`。
+     */
+    val toolTimeline: List<AiToolEvent> = emptyList(),
+    /**
+     * ★★ **同一条回答的多个版本** (2026-10-05)。
+     *
+     * 用户原话:「修改的那个功能，像 deepseek 一样有个 1/2，2/2 一样表示修改的次数
+     * 还有每次的内容」。
+     *
+     * ## 什么时候会有多版
+     *  - **重新生成**: 同一句提问让 AI 再答一遍 —— 旧答案不该被丢掉, 它是"第 1 版";
+     *  - **修改后重发**: 用户改了提问再发 —— 上一轮的问答整组算"第 1 版"。
+     *
+     * ## 为什么 userText 要存在**版本**里而不是只存一次
+     * 「修改」改的正是**用户那句提问**。第 1 版的提问和第 2 版可能完全不同, 所以每一版
+     * 必须各自记住"当时问的是什么" —— 切回第 1 版时, 上面那条 user 气泡也要跟着换回去。
+     *
+     * ⚠️ 空列表 = 只有一版(就是本消息自己)。**永远不会有 size==1 的 variants** ——
+     *   产生多版时一定是"旧 + 新"两条一起写进去。
+     * ⚠️ 老会话 JSON 里没这个键 → Gson 反射成 **null**, 读取处一律 `.orEmpty()`。
+     */
+    val variants: List<MsgVariant> = emptyList(),
+    /** 当前显示第几版 (0-based)。[variants] 为空时无意义 */
+    val variantIndex: Int = 0,
+) {
+    /** 一共几版。没有 [variants] 时算 1 版(就是它自己) */
+    val versionCount: Int get() = variants.orEmpty().size.coerceAtLeast(1)
+
+    /** 把本消息自身抽成"一个版本" —— 用来生成 [variants] 里的第一项 */
+    fun toVariant(userText: String = ""): MsgVariant = MsgVariant(
+        userText = userText,
+        content = content,
+        think = think.orEmpty(),
+        thinkMs = thinkMs,
+        searchQueries = searchQueries.orEmpty(),
+        wikiQueries = wikiQueries.orEmpty(),
+        checkCount = checkCount,
+        rechecked = rechecked,
+        recheckIssueCount = recheckIssueCount,
+        recheckIssues = recheckIssues.orEmpty(),
+        toolTimeline = toolTimeline.orEmpty(),
+        turnId = turnId,
+    )
+
+    /**
+     * 切到第 [i] 版 —— **内容 / 思考 / 工具过程一起换**。
+     *
+     * ⚠️ 必须整组换, 不能只换正文: 不然会出现"第 1 版的正文 + 第 2 版的思考过程"这种
+     *   自相矛盾的展示, 用户会以为 AI 前后不一致。
+     */
+    fun switchTo(i: Int): UiMsg {
+        val vs = variants.orEmpty()
+        if (vs.size <= 1) return this
+        val k = i.coerceIn(0, vs.lastIndex)
+        val v = vs[k]
+        return copy(
+            content = v.content,
+            think = v.think,
+            thinkMs = v.thinkMs,
+            searchQueries = v.searchQueries,
+            wikiQueries = v.wikiQueries,
+            checkCount = v.checkCount,
+            rechecked = v.rechecked,
+            recheckIssueCount = v.recheckIssueCount,
+            recheckIssues = v.recheckIssues,
+            toolTimeline = v.toolTimeline,
+            turnId = v.turnId,
+            variantIndex = k,
+        )
+    }
+}
+
+/**
+ * ★★ **一版回答** (2026-10-05) —— 见 [UiMsg.variants]。
+ *
+ * 字段是 [UiMsg] 里"随版本变化"的那部分。刻意**不复用 UiMsg 自身**做嵌套:
+ * 那样会形成 UiMsg 套 UiMsg 的递归结构, Gson 落盘/读回的风险和心智负担都不值得。
+ *
+ * ⛔ 必须放在 `data` 包 —— Gson + R8 只保留 data 包的字段名(见本文件顶部注释)。
+ */
+data class MsgVariant(
+    /** 这一版对应的**用户提问原文**(含附件包装; 展示时走 `AiAttach.displayText`) */
+    val userText: String = "",
+    /** 回答正文 */
+    val content: String = "",
+    /** 思考过程 */
+    val think: String = "",
+    /** 思考耗时(毫秒) */
+    val thinkMs: Long = 0L,
+    val searchQueries: List<String> = emptyList(),
+    val wikiQueries: List<String> = emptyList(),
+    val checkCount: Int = 0,
+    val rechecked: Boolean = false,
+    val recheckIssueCount: Int = 0,
+    val recheckIssues: List<String> = emptyList(),
+    val toolTimeline: List<AiToolEvent> = emptyList(),
+    /** 服务端轮次 id (官方通道才有) —— 逐版不同, 否则点赞会点到别的版本上 */
+    val turnId: Long = 0L,
 )
 
 /**

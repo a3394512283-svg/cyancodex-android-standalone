@@ -101,9 +101,22 @@ fun AboutScreen(nav: NavHostController) {
     // 已解锁后再点 → 直接进调试面板（不用再点 7 次）
     var tapCount by remember { mutableStateOf(0) }
     var tapHint by remember { mutableStateOf("") }
-    var debugUnlocked by remember { mutableStateOf(DebugStore.unlocked) }
 
     fun onVersionTap() {
+        // ★★ 2026-10-05: 总开关关着时的**再开启兜底**。
+        //
+        // 为什么必须有: 现在设置页的「调试」入口跟随总开关显示(见 SettingsScreen 的 debugVisible),
+        // 开关一关入口就没了。若这里不做点什么, 用户就**再也找不到回去的路**。
+        // 这与安卓「开发者选项」的行为一致 —— 关掉之后, 再连点版本号还能重新打开。
+        // 这里简化成"点一下就重开", 因为此时用户显然已经知道这个入口存在。
+        if (DebugStore.unlocked && !DebugStore.masterOn) {
+            DebugStore.masterOn = true
+            DebugStore.logEnabled = true
+            DebugStore.log("Debug", "调试模式已重新开启 (关于页点版本号)")
+            Toast.makeText(ctx, "调试模式已重新开启", Toast.LENGTH_SHORT).show()
+            nav.navigate(Routes.DEBUG)
+            return
+        }
         if (DebugStore.unlocked) {
             nav.navigate(Routes.DEBUG)
             return
@@ -111,9 +124,11 @@ fun AboutScreen(nav: NavHostController) {
         tapCount++
         if (tapCount >= 7) {
             DebugStore.unlocked = true
+            // ★ 解锁的同时把总开关也打开 —— 否则"解锁了但入口还是不显示",
+            //   因为入口判的是 activeState(解锁 且 总开关开着)。
+            DebugStore.masterOn = true
             DebugStore.logEnabled = true
             DebugStore.log("Debug", "调试模式已解锁 (连点版本号 7 次)")
-            debugUnlocked = true
             tapCount = 0
             tapHint = "调试模式已解锁"
             Toast.makeText(ctx, "调试模式已解锁，已跳转调试面板", Toast.LENGTH_LONG).show()

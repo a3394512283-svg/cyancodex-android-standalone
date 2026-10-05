@@ -72,8 +72,18 @@ fun SettingsScreen(nav: NavHostController) {
     var bgWatch by remember { mutableStateOf(Session.backgroundWatch) }
     var ignoringBattery by remember { mutableStateOf(isIgnoringBattery(ctx)) }
     var plugins by remember { mutableStateOf(com.canglan.cyancodex.plugin.PluginManager.list()) }
-    // 调试面板入口可见性：关于页连点版本号 7 次解锁后为 true
-    var debugUnlocked by remember { mutableStateOf(com.canglan.cyancodex.data.DebugStore.unlocked) }
+    // 调试面板入口可见性。
+    //
+    // ★★ 2026-10-05 修 bug: 用户原话「我不是说把调试模式关上设置底下的调试就自动隐藏吗」。
+    //    原来这里写的是 `remember { mutableStateOf(DebugStore.unlocked) }`, 有两个毛病:
+    //      ① 判的是 **unlocked(入口闸)**, 没判**总开关** —— 于是总开关关掉了, 入口照样在;
+    //      ② `remember` 是一次性快照 —— 在调试面板里改了开关, 返回设置页**不会刷新**。
+    //    现在直接读 [DebugStore.activeState](解锁 且 总开关开着), 它是 Compose 可观察的,
+    //    开关一改就重组。语义与安卓「开发者选项」一致: 顶部开关一关, 设置里的入口就没了。
+    //
+    // ⚠️ 关掉之后怎么再进去? 见 AboutScreen: 版本号连点 7 次会**重新打开总开关**并跳转,
+    //    这就是安卓那边"再点 7 次版本号"的同款兜底, 不会把自己锁在外面。
+    val debugVisible = com.canglan.cyancodex.data.DebugStore.activeState
 
     fun checkOverlay() {
         canOverlay = Settings.canDrawOverlays(ctx)
@@ -460,6 +470,28 @@ fun SettingsScreen(nav: NavHostController) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+
+                // ---- AI 回答保活 (2026-10-05) ----
+                // 用户反馈「AI 任务一切后台就断」。机制上是"进程级协程 + 前台服务"两层，
+                // 但**通知权限被关时前台服务通知不显示**，用户会以为没有保活。
+                // 这里如实说清楚它长什么样、能干什么，并给一个直接的补救入口。
+                Text("AI 回答时后台保活", style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    "AI 回答期间状态栏会显示一条「AI 正在回答」通知（带计时器）："
+                        + "它就是保活的凭证，切到别的应用也能让回答跑完，完成后再通知你。"
+                        + "不想等了可以在通知里直接点「停止生成」，已写出的内容会保留。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                if (!notifEnabled) {
+                    Text(
+                        "⚠ 通知权限未开启：保活仍在工作，但通知栏看不到这条提示，也收不到「回答好了」提醒。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(if (ignoringBattery) Icons.Default.CheckCircle else Icons.Default.Warning, null,
                         tint = if (ignoringBattery) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
@@ -664,8 +696,10 @@ fun SettingsScreen(nav: NavHostController) {
             Text("世纪集团旗下 · 沧蓝工坊工作室 · CyanCodex v${com.canglan.cyancodex.BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.fillMaxWidth().padding(top = 8.dp))
 
-            // ===== 调试面板入口 (仅在「关于页连点版本号 7 次」解锁后出现) =====
-            if (debugUnlocked) {
+            // ===== 调试面板入口 =====
+            // 可见条件 = 已解锁 **且 总开关开着** (见上面 [debugVisible] 的注释)。
+            // 关掉总开关 → 这里整块消失, 与安卓「开发者选项」一致。
+            if (debugVisible) {
                 SectionHeader("调试")
                 SectionCard("调试") {
                     Text("服务器地址 / 日志 / 网络请求记录",

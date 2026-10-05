@@ -106,7 +106,64 @@ object AiSearch {
         .readTimeout(25, TimeUnit.SECONDS)
         .build()
 
+    /**
+     * ★★ **境外源专用客户端** —— 超时更短 (2026-10-05)。
+     *
+     * 用户原话:「给维基百科这类海外接口加上超时处理，超时后返回 xx接口超时，原因为xxx
+     * （境外接口连接过慢）给 ai」。
+     *
+     * ## 为什么必须单独一份、而且必须**更短**
+     * [wikiSearchMulti] 是 `awaitAll` 收口的 —— 总耗时 = **最慢的那个源**。
+     * 维基百科在本机实测被 DNS 污染 (解析到 31.13.73.9 → TCP 443 不通), 用默认的
+     * 15s connect 超时, **每一次**知识源检索都要白等 15 秒, 五个源里就它一个拖后腿。
+     * 这里压到 connect 6s / read 8s / call 10s: 通了照样拿得到结果, 不通就**快速失败**,
+     * 用户等的是 6 秒而不是 15 秒, 而且能拿到一句明确的"超时原因"。
+     *
+     * ⚠️ `callTimeout` 是**整次调用的硬上限** —— 它连"连上了但一直不吐数据"也一并兜住,
+     *   这是前两个超时兜不住的场景。
+     */
+    private val overseasClient = client.newBuilder()
+        .connectTimeout(6, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .callTimeout(10, TimeUnit.SECONDS)
+        .build()
+
+    /** 按源选客户端 —— 境外走短超时那份 (见 [overseasClient]) */
+    private fun clientFor(overseas: Boolean): OkHttpClient = if (overseas) overseasClient else client
+
     private val JSON = "application/json; charset=utf-8".toMediaType()
+
+    /**
+     * ★ **把网络异常翻译成一句人话原因** (2026-10-05)。
+     *
+     * 用户要的文案形如「维基百科·中文 接口超时，原因为连接超时（境外接口连接过慢）」。
+     * 分类的意义在于**模型能据此换策略**: 看到"超时"它会改用已有知识并说明未查到,
+     * 看到"没有这个条目"它会换关键词 —— 两者必须区分开。
+     *
+     * @param overseas 境外源才加"（境外接口连接过慢）"这个后缀 —— 国内站超时是另一回事
+     */
+    private fun netErrReason(e: Throwable, overseas: Boolean): String {
+        val suffix = if (overseas) "（境外接口连接过慢）" else ""
+        return when {
+            e is java.net.SocketTimeoutException -> "连接超时$suffix"
+            e is java.net.UnknownHostException -> "域名解析失败$suffix"
+            e is java.net.ConnectException -> "连接被拒绝$suffix"
+            e is javax.net.ssl.SSLException -> "TLS 握手失败$suffix"
+            e is java.io.InterruptedIOException -> "读取超时$suffix"
+            e.message?.contains("timeout", ignoreCase = true) == true -> "连接超时$suffix"
+            else -> (e.message ?: e.javaClass.simpleName).take(60)
+        }
+    }
+
+    /**
+     * 把「某源失败了 + 原因」拼成给模型看的一行。
+     *
+     * 例: `维基百科·中文 接口超时，原因为连接超时（境外接口连接过慢）`
+     */
+    fun failureLine(srcId: String, reason: String): String {
+        val name = sourceName(srcId)
+        return "$name 接口超时，原因为$reason"
+    }
 
     /**
      * 配了引擎**且**填了 Key 才算可用 —— 输入框的 chip 用它决定显不显示。
@@ -384,22 +441,24 @@ object AiSearch {
         val q = query.trim()
         if (q.isBlank()) return@withContext emptyList()
         // 中文站优先; 它挂了或搜不到才去英文站。两次都失败就抛 —— 调用方会把异常原文交给模型。
-        val zh = runCatching { wikiQuery(WIKI_ZH, q, limit) }.getOrElse { e ->
+        // ★ 2026-10-05: 两个站都是**境外**站, 一律走短超时客户端 (见 [overseasClient])
+        val c = clientFor(overseas = true)
+        val zh = runCatching { wikiQuery(WIKI_ZH, q, limit, c) }.getOrElse { e ->
             // 中文站是"网络/服务"级失败(不是"没搜到"), 英文站大概率同样连不上, 直接抛更有信息量
             if (e is RuntimeException && e.message?.contains("检索失败") == true) throw e else emptyList()
         }
         if (zh.isNotEmpty()) return@withContext zh
-        wikiQuery(WIKI_EN, q, limit)
+        wikiQuery(WIKI_EN, q, limit, c)
     }
 
     /** [wikiSearch] 的单站实现。见上面关于 `exintro` / `origin` 的两条 ⚠️ */
-    private fun wikiQuery(api: String, q: String, limit: Int): List<WebHit> {
+    private fun wikiQuery(api: String, q: String, limit: Int, c: OkHttpClient = client): List<WebHit> {
         val url = api + "?action=query&format=json&generator=search&redirects=1" +
             "&gsrsearch=" + enc(q) +
             "&gsrlimit=" + limit.coerceIn(1, 10) +
             "&prop=extracts&explaintext=1&exchars=800"
         val req = Request.Builder().url(url).header("Accept", "application/json").build()
-        client.newCall(req).execute().use { resp ->
+        c.newCall(req).execute().use { resp ->
             val text = resp.body?.string().orEmpty()
             if (!resp.isSuccessful) throw RuntimeException("MC 百科检索失败(${resp.code})")
             val pages = JSONObject(text).optJSONObject("query")?.optJSONObject("pages")
@@ -451,8 +510,15 @@ object AiSearch {
     //   Fandom 时通时不通。若共用一个 try, 任何一个挂掉都会让整次检索失败。
     //   独立之后: 挂了的那源只是"未取到", 其余源的结果照常给模型。
 
-    /** 一个知识源的静态描述 —— 用于 UI 展示"查了哪些源"、以及排序去重时的来源标记 */
-    data class Source(val id: String, val name: String)
+    /**
+     * 一个知识源的静态描述 —— 用于 UI 展示"查了哪些源"、以及排序去重时的来源标记。
+     *
+     * @param overseas ★ 是否**境外站点** (2026-10-05)。决定两件事:
+     *   ① 用**更短超时**的客户端 (见 [clientFor]) —— 被墙的源要**快速失败**,
+     *      否则 `awaitAll` 会被它拖住十几秒, 整个并发检索一起变慢;
+     *   ② 超时文案里点名"境外接口连接过慢", 让用户一眼知道**是网络不是条目不存在的锅**。
+     */
+    data class Source(val id: String, val name: String, val overseas: Boolean = true)
 
     /**
      * mc_wiki 工具的**知识源清单**（按优先级排序，靠前的在合并结果里排前面）。
@@ -466,21 +532,41 @@ object AiSearch {
      *   暴露的是**只读元数据**(id + 展示名), 没有任何密钥或可变状态。
      */
     val SOURCES: List<Source> = listOf(
-        Source("mc_zh", "MC百科·中文"),      // zh.minecraft.wiki  —— 最全, 中文条目名
-        Source("mc_en", "MC Wiki·英文"),     // minecraft.wiki   —— 中文搜不到时兜底
-        Source("mcmod", "mcmod.cn"),        // 中文社区资料站, HTML 解析
-        Source("wiki_zh", "维基百科·中文"),   // 被墙, 失败即跳过
-        Source("wiki_en", "维基百科·英文"),   // 同上
+        Source("mc_zh", "MC百科·中文"),            // zh.minecraft.wiki  —— 最全, 中文条目名 (境外)
+        Source("mc_en", "MC Wiki·英文"),           // minecraft.wiki   —— 中文搜不到时兜底 (境外)
+        Source("mcmod", "mcmod.cn", overseas = false), // 中文社区资料站, HTML 解析 (国内, 直连可达)
+        Source("wiki_zh", "维基百科·中文"),         // 被墙, 失败即跳过
+        Source("wiki_en", "维基百科·英文"),         // 同上
     )
 
     /** UI 展示用: 上一次 [wikiSearchMulti] 实际查过哪些源、各取到几条。给「过程时间线」用 */
     private val lastSourceStats = java.util.concurrent.ConcurrentHashMap<String, Int>()
 
+    /**
+     * ★ **上一次各源的失败原因** (源 id → 人话原因), 2026-10-05。
+     *
+     * 用户原话:「给维基百科这类海外接口加上超时处理，超时后返回 xx接口超时，原因为xxx
+     * （境外接口连接过慢）给 ai」。
+     *
+     * 为什么要单独存: 老代码里 `runCatching{...}.getOrDefault(emptyList())` 把异常**直接吃掉**了 ——
+     * 结果只剩"0 条"。模型看到"维基百科(0条)"只会以为"这个站没有这条目", 于是**继续编**;
+     * 用户看到"维基0"也以为是站点没资料。真相是**根本没连上**。把原因留下来, 两边都不会误判。
+     *
+     * 成功的源**不在**这个 map 里。
+     */
+    private val lastSourceErrors = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     /** 取上次各源的命中数快照 (源 id → 条数; 0 = 未取到) */
     fun lastSourceHits(): Map<String, Int> = HashMap(lastSourceStats)
 
+    /** 取上次各源的**失败原因**快照 (源 id → 原因; 没失败的源不在里面) */
+    fun lastSourceErrors(): Map<String, String> = HashMap(lastSourceErrors)
+
     /** 源 id → 展示名 */
     fun sourceName(id: String): String = SOURCES.firstOrNull { it.id == id }?.name ?: id
+
+    /** 源 id → 静态描述 (拿 [Source.overseas] 等) */
+    fun sourceOf(id: String): Source? = SOURCES.firstOrNull { it.id == id }
 
     /**
      * **多源并发检索** —— mc_wiki 工具的新入口。
@@ -495,15 +581,26 @@ object AiSearch {
         val q = query.trim()
         if (q.isBlank()) return emptyList()
         lastSourceStats.clear()
+        lastSourceErrors.clear()
 
-        // ★ 每个源一个 async, 各自 runCatching —— 任一源抛异常都被吃掉, 只记 0 条。
+        // ★ 每个源一个 async, 各自 try/catch —— 任一源抛异常都被吃掉, 只记 0 条。
         // ⚠️ 这里**不要**把局部变量命名成 `hits` —— 会遮蔽成员函数 `hits(...)`,
         //    且 `emptyList()` 在 getOrDefault 下推不出类型 → 整片级联报错(踩过)。
+        //
+        // ★ 2026-10-05: 从 `runCatching{}.getOrDefault()` 改成**显式 catch + 记录原因** ——
+        //   老写法把异常吞得一点不剩, 模型和用户都只看到"0 条", 会误以为"这个站没这条目"。
+        //   现在失败原因进 [lastSourceErrors], 一路带到工具返回文本里给模型看。
         val deferred = SOURCES.map { src ->
             coroutineScope {
                 async(Dispatchers.IO) {
-                    val got: List<WebHit> =
-                        runCatching { fetchSource(src, q, limit) }.getOrDefault(emptyList())
+                    val got: List<WebHit> = try {
+                        fetchSource(src, q, limit)
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e   // 取消要传播, 别当成"这个源失败了"
+                    } catch (e: Throwable) {
+                        lastSourceErrors[src.id] = netErrReason(e, src.overseas)
+                        emptyList()
+                    }
                     lastSourceStats[src.id] = got.size
                     got
                 }
@@ -528,13 +625,18 @@ object AiSearch {
     }
 
     /** 单源分发。新增源只需在 [SOURCES] 加一项 + 这里加一个分支 */
-    private fun fetchSource(src: Source, q: String, limit: Int): List<WebHit> = when (src.id) {
-        "mc_zh" -> wikiQuery(WIKI_ZH, q, limit)
-        "mc_en" -> wikiQuery(WIKI_EN, q, limit)
-        "mcmod" -> mcmodSearch(q, limit)
-        "wiki_zh" -> wikiQuery(WIKI_ZH_PEDIA, q, limit)
-        "wiki_en" -> wikiQuery(WIKI_EN_PEDIA, q, limit)
-        else -> emptyList()
+    // ★ 2026-10-05: 按 [Source.overseas] 选客户端 —— 境外源走短超时那份 (见 [overseasClient])。
+    //   mcmod.cn 是国内站, 走默认 15s 客户端; 其余(含 zh.minecraft.wiki)都是境外, 走 6s。
+    private fun fetchSource(src: Source, q: String, limit: Int): List<WebHit> {
+        val c = clientFor(src.overseas)
+        return when (src.id) {
+            "mc_zh" -> wikiQuery(WIKI_ZH, q, limit, c)
+            "mc_en" -> wikiQuery(WIKI_EN, q, limit, c)
+            "mcmod" -> mcmodSearch(q, limit, c)
+            "wiki_zh" -> wikiQuery(WIKI_ZH_PEDIA, q, limit, c)
+            "wiki_en" -> wikiQuery(WIKI_EN_PEDIA, q, limit, c)
+            else -> emptyList()
+        }
     }
 
     /** 维基百科中文站。⚠️ 本机实测被 DNS 污染, 不保证可达 —— 失败会被上层吃掉 */
@@ -556,12 +658,12 @@ object AiSearch {
      * ⚠️ HTML 站点随时可能改版 —— 抠不到就返回空列表(上层会当成"这个源没结果"),
      *    **绝不能因为解析失败而抛异常**, 那会连累其它源。
      */
-    private fun mcmodSearch(q: String, limit: Int): List<WebHit> {
+    private fun mcmodSearch(q: String, limit: Int, c: OkHttpClient = client): List<WebHit> {
         val url = "https://search.mcmod.cn/s?key=" + enc(q)
         val req = Request.Builder().url(url)
             .header("Accept", "text/html,application/xhtml+xml")
             .build()
-        client.newCall(req).execute().use { resp ->
+        c.newCall(req).execute().use { resp ->
             if (!resp.isSuccessful) throw RuntimeException("mcmod 搜索失败(${resp.code})")
             val html = resp.body?.string().orEmpty()
             if (html.isBlank()) return emptyList()
@@ -713,16 +815,32 @@ object AiSearch {
      */
     fun buildMultiWikiToolResult(hits: List<WebHit>): String {
         val stats = lastSourceHits()
+        val errors = lastSourceErrors()
         val tried = SOURCES.map { it.name to (stats[it.id] ?: 0) }
         val header = "本次检索的知识源：" +
             tried.joinToString("、") { "${it.first}(${it.second}条)" } + "\n"
 
+        // ★★ 失败原因**必须交给模型** (2026-10-05) —— 用户原话:
+        //   「超时后返回 xx接口超时，原因为xxx（境外接口连接过慢）给 ai」。
+        //
+        //   为什么这句话如此关键: 老代码把异常吞了, 模型只看到"维基百科(0条)", 会理解成
+        //   "这个站没有这个条目" → 于是**继续编**或者换关键词反复试。告诉它"接口超时"之后,
+        //   它才知道该"凭已有知识回答并如实说明未查到", 而不是把 0 条当成"不存在"。
+        val failLines = errors.entries.joinToString("\n") { (id, why) ->
+            "· " + failureLine(id, why)
+        }
+        val failBlock = if (failLines.isBlank()) "" else
+            "\n⚠️ 以下接口本次**没有取到资料**（不是「没有这个条目」，是接口没连上）：\n$failLines\n" +
+                "对这些来源的内容请**不要编造**；若因此资料不足，请如实说明「未查到」并给出你已知的通用做法。\n"
+
         if (hits.isEmpty()) {
-            return header + "以上源都没有搜到相关条目。请换一组关键词（用中文条目名，如「命令 execute」「记分板」），" +
+            return header + failBlock +
+                "以上源都没有搜到相关条目。请换一组关键词（用中文条目名，如「命令 execute」「记分板」），" +
                 "或直接凭已有知识回答。"
         }
         val sb = StringBuilder()
         sb.append(header)
+        sb.append(failBlock)
         sb.append("以下内容来自《我的世界》Wiki / MC 百科 / 维基百科等（权威，但可能滞后于最新版本）：\n")
         sb.append("⚠️ 正文里标注「[仅Java版]」的写法在网易版（基岩版内核）**不可用**，必须改用基岩版写法或放弃；")
         sb.append("标注「[仅基岩版]」的才适用于网易版。\n")

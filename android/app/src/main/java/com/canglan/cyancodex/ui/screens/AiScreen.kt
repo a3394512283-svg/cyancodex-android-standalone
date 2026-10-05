@@ -2,10 +2,12 @@ package com.canglan.cyancodex.ui.screens
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
@@ -21,10 +24,13 @@ import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Book
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ChevronLeft
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Psychology
@@ -32,6 +38,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ThumbDown
 import androidx.compose.material.icons.filled.ThumbUp
@@ -114,6 +121,14 @@ fun AiScreen(nav: NavHostController) {
     // ⛔ 这是一份**草稿态**: 发送成功后才随消息落盘, 中途切换会话要清空(见下面 LaunchedEffect)。
     //    不清的话会把 A 会话选的附件带到 B 会话, 一发出去就是错的文件。
     var attachDraft by remember { mutableStateOf<List<Attachment>>(emptyList()) }
+    // ★★ 「修改」待重发时暂存的**旧回答 + 旧提问** (2026-10-05) —— 见 [UiMsg.variants]。
+    //
+    // 为什么不在点「修改」时就把旧的一轮丢掉: 用户原话「像 deepseek 一样有个 1/2、2/2
+    // 一样表示修改的次数还有每次的内容」—— 旧的那一版要能翻回去看。
+    // 所以点「修改」只把**界面**截断到那条提问之前(和原来一样), 旧回答暂存在这里,
+    // 重发成功时由 AiTaskRunner 作为第 1 版并回去。
+    var pendingPrev by remember { mutableStateOf<UiMsg?>(null) }
+    var pendingPrevUser by remember { mutableStateOf("") }
     // 文件选择器 —— SAF 的 OpenDocument: 不需要任何存储权限, 拿到的是临时可读 Uri。
     // ★ 用 OpenDocument 而不是 GetContent: 前者能在"最近文件/网盘"里稳定取到
     //   display name 与 size(OpenableColumns), 这正是要在气泡上显示的东西。
@@ -186,16 +201,54 @@ fun AiScreen(nav: NavHostController) {
     // ⚠️ tick == 0 表示"一次都还没跑过": 此时只重读列表、不滚动 ——
     //    否则第一次进页面会被强行拽到底部, 看不到历史。
     /**
-     * 滚到底。**suspend** —— 内部要等一帧 + 调 suspend 的 `scrollToItem`。
+     * 视口里**最后一项的底边**超出视口底边多少像素。> 0 = 内容还在屏幕下方。
      *
-     * ⚠️ 先 `withFrameNanos` 等布局跑完再读 `totalItemsCount`: 否则刚发消息那一帧列表
+     * ⛔⛔ **这里就是 2026-10-05 那个"输出时锁在最上面、滑不下去"的根因。**
+     *
+     * 原来 [scrollToBottom] 用的是 `listState.scrollToItem(最后一项)`。而
+     * `scrollToItem(i)` 的语义是"把第 i 项的**顶边**对齐视口顶边"——
+     * 流式气泡常常比屏幕还高, 于是它把气泡的**开头**钉在屏幕顶部, 新吐出来的字
+     * 全部落在屏幕下方。用户看到的就是"一直锁在最上面, 滑不下去";
+     * 更要命的是流式每 80ms 触发一次, 手动往上翻也会立刻被拽回去。
+     *
+     * 正解是**按差值滚动**: 算出"内容底边超出视口底边多少", 就往下滚多少 ——
+     * 这样无论气泡多高, 最新吐出的字始终贴在屏幕底部。
+     */
+    val bottomOvershoot: () -> Int = {
+        val info = listState.layoutInfo
+        val last = info.visibleItemsInfo.lastOrNull()
+        if (last == null) 0
+        else (last.offset + last.size) - (info.viewportEndOffset - info.afterContentPadding)
+    }
+
+    /**
+     * 用户是不是**贴着底部**在看。差 ≤ 24px 就算贴底(手指抖动 / 亚像素误差)。
+     *
+     * 用来回答"要不要自动跟随" —— 用户手动往上翻看前面的内容时, 不该再把他拽回底部。
+     */
+    val isAtBottom: () -> Boolean = { bottomOvershoot() <= 24 }
+
+    /**
+     * 滚到底。**suspend** —— 内部要等一帧 + 调 suspend 的 `scrollBy`。
+     *
+     * ⚠️ 先 `withFrameNanos` 等布局跑完再读 `layoutInfo`: 否则刚发消息那一帧列表
      *    还没测量完, 读到的是旧值, 滚不到位。
      * ⛔ **不要**改成 `scrollToItem(Int.MAX_VALUE)` —— 实测会 ANR, 见下面的长注释。
+     * ⛔ **也不要**退回 `scrollToItem(最后一项)` —— 那正是上面 [bottomOvershoot] 说的病根。
      */
     val scrollToBottom: suspend () -> Unit = {
         withFrameNanos { }
-        val n = listState.layoutInfo.totalItemsCount
-        if (n > 0) runCatching { listState.scrollToItem(n - 1) }
+        val d = bottomOvershoot()
+        if (d > 0) runCatching { listState.scrollBy(d.toFloat()) }
+    }
+
+    /**
+     * 「回到底部」按钮的显隐。与 [isAtBottom] 同源, 但要一个**可观察的布尔量**
+     * 才能驱动重组 —— 函数每次调用返回新值是不会触发重组的。
+     */
+    var atBottom by remember { mutableStateOf(true) }
+    LaunchedEffect(listState) {
+        snapshotFlow { isAtBottom() }.collect { atBottom = it }
     }
 
     LaunchedEffect(AiTaskRunner.tick) {
@@ -225,7 +278,15 @@ fun AiScreen(nav: NavHostController) {
         }.collect { (busy, _) ->
             // 任务一开始就滚一次(把"思考中"气泡带进视口), 之后流式每 80ms 变一次就再滚一次,
             // 于是"字一直在蹦, 视图一直在底" ✓
-            if (busy) scrollToBottom()
+            //
+            // ★★ 2026-10-05: 加 `isAtBottom()` 守卫 —— 用户**手动往上翻**看前面内容时,
+            //   不能再每 80ms 把他拽回底部。这是所有成熟对话客户端的标准行为
+            //   (WorkBuddy / DeepSeek 都是: 你一往上滑, 自动跟随立刻停)。
+            //
+            // ⚠️ 这里**不能**用上面那个 `atBottom` 状态变量: `LaunchedEffect(curId)` 不会
+            //   因为 `atBottom` 变化而重启, 闭包捕获到的是启动那一刻的旧值 ——
+            //   表现为"守卫恒为启动时的值", 等于白加。所以每次**现读** [isAtBottom]。
+            if (busy && isAtBottom()) scrollToBottom()
         }
     }
 
@@ -439,8 +500,15 @@ fun AiScreen(nav: NavHostController) {
                 // ★ 2026-10-05: 只挂附件(没打字)时也**可以发** —— 用户拖个文件进来就是要
                 //   问"这文件啥意思", 逼他再打一行字是多余的门槛。所以条件改成
                 //   「输入框有字 **或** 有附件」。
-                val sendEnabled = !AiTaskRunner.isBusyFor(cur?.id ?: "") &&
-                    (input.isNotBlank() || attachDraft.isNotEmpty()) && (hasKey || unlocked)
+                //
+                // ★★ 2026-10-05 再改: 用户原话「那个进行中的任务发送键不要始终灰色, 改成像
+                //   workbuddy 等 agent 工具一样有个停止生成」。所以把"在跑"从 sendEnabled 里
+                //   **摘出来单独判** —— 在跑时那个位置渲染的是**停止键**(不再是灰掉的发送键)。
+                val busyNow = AiTaskRunner.isBusyFor(cur?.id ?: "")
+                val canSend = (input.isNotBlank() || attachDraft.isNotEmpty()) && (hasKey || unlocked)
+                val sendEnabled = !busyNow && canSend
+                // ⚠️ `onPrimaryAction` 的赋值**必须放在 [doSend] 之后** ——
+                //   Kotlin 的局部 val/lambda 不支持前向引用, 写在这里会 "Unresolved reference 'doSend'"。
 
                 // 发送逻辑只写一份 —— 玻璃/非玻璃/重新生成三处共用, 免得改一处漏一处。
                 //
@@ -455,7 +523,16 @@ fun AiScreen(nav: NavHostController) {
                 //   同时把附件元信息存进 UiMsg.attachments 供气泡渲染。为什么两条都做:
                 //   · 拼进 content → 两条 AI 通道(自备直连 / 官方代理)不用改一行就都能看到文件;
                 //   · 存 attachments → 气泡上能画出「📎 文件名 · 12.3 KB」, 用户看得见自己发了什么。
-                fun send(base: List<UiMsg>, raw: String, atts: List<Attachment> = emptyList()) {
+                fun send(
+                    base: List<UiMsg>,
+                    raw: String,
+                    atts: List<Attachment> = emptyList(),
+                    // ★★ 被本次重发替换掉的旧回答 / 旧提问 (2026-10-05) —— 「重新生成」与
+                    //    「修改后重发」传, 普通发送传 null。见 [UiMsg.variants] 与
+                    //    `AiTaskRunner.mergeVariants`。
+                    prev: UiMsg? = null,
+                    prevUser: String = "",
+                ) {
                     val q = raw.trim()
                     // 没字也没附件 → 不发。有附件时允许空文本(会补一句默认引导语)。
                     if (q.isBlank() && atts.isEmpty()) return
@@ -485,21 +562,69 @@ fun AiScreen(nav: NavHostController) {
                         // ★ 会话模式: 它决定挂不挂 MC 百科 / 语法核对 (见 AiMode)。
                         //   传的是**这条会话**的模式, 不是全局开关。
                         mode = convMode,
+                        prevAssistant = prev,
+                        prevUserText = prevUser,
                     )
                 }
 
                 val doSend: () -> Unit = {
                     val q = input
                     val atts = attachDraft
+                    // ★ 取走待重发的旧版本 (点过「修改」才会有) —— 取完必须清, 否则
+                    //   下一条**无关**的新消息也会莫名其妙多出一个版本表。
+                    val prev = pendingPrev
+                    val prevUser = pendingPrevUser
+                    pendingPrev = null
+                    pendingPrevUser = ""
                     input = ""
                     attachDraft = emptyList()
-                    send(messages, q, atts)
+                    send(messages, q, atts, prev, prevUser)
                 }
 
-                // 「重新生成」= 砍掉最后一轮问答, 拿同一句提问重发 (对齐截图里的那个刷新按钮)
+                /**
+                 * 点输入框右边那个键 —— **在跑 = 停止生成, 否则 = 发送**。
+                 *
+                 * 声明位置在 [doSend] **之后**不是随意的: 局部 lambda 不能前向引用。
+                 * 这也顺带说明为什么它不是 `Button(onClick = ...)` 里内联的 ——
+                 * 玻璃与非玻璃两条分支要共用同一个动作, 否则改了停止逻辑会漏掉一条通道。
+                 */
+                val onPrimaryAction: () -> Unit = {
+                    if (busyNow) AiTaskRunner.stop(cur?.id ?: "") else if (sendEnabled) doSend()
+                }
+
+                // 「重新生成」= 同一句提问让 AI 再答一遍。★ 2026-10-05: **不再丢掉旧回答** ——
+                //   它变成第 1 版, 新答案成为第 2 版, 气泡下方出现 `‹ 1/2 ›` 可来回翻。
                 val doRegenerate: () -> Unit = {
                     val i = messages.indexOfLast { it.role == "user" }
-                    if (i >= 0) send(messages.take(i), messages[i].content)
+                    if (i >= 0) {
+                        val prev = messages.getOrNull(i + 1)?.takeIf { it.role == "assistant" }
+                        send(messages.take(i), messages[i].content, emptyList(), prev, messages[i].content)
+                    }
+                }
+
+                /**
+                 * ★★ **切换回答版本** (2026-10-05) —— 点气泡下方 `‹ 1/2 ›` 时调。
+                 *
+                 * 用户原话:「像 deepseek 一样有个 1/2，2/2 一样表示修改的次数还有每次的内容」。
+                 *
+                 * ⚠️ 两件事要**一起**做, 少一件就不对:
+                 *   ① 换掉这条 assistant 的正文/思考/工具过程 (见 [UiMsg.switchTo]);
+                 *   ② 换掉**上面那条 user 气泡的文本** —— 「修改」产生的每一版提问可能不同,
+                 *      只换答案不换提问, 用户会看到"问 A 却答了 B 的内容"。
+                 */
+                val doSwitchVariant: (Int, Int) -> Unit = { idx, target ->
+                    val m = messages.getOrNull(idx)
+                    if (m != null && m.variants.orEmpty().size > 1) {
+                        val next = messages.toMutableList()
+                        next[idx] = m.switchTo(target)
+                        val vs = m.variants.orEmpty()
+                        val uv = vs[target.coerceIn(0, vs.lastIndex)].userText
+                        val ui = idx - 1
+                        if (uv.isNotBlank() && ui >= 0 && messages[ui].role == "user") {
+                            next[ui] = messages[ui].copy(content = uv)
+                        }
+                        setMessages(next)
+                    }
                 }
                 // 聊天列表
                 LazyColumn(
@@ -654,6 +779,52 @@ fun AiScreen(nav: NavHostController) {
                                                         maxLines = if (open) Int.MAX_VALUE else 3,
                                                         overflow = TextOverflow.Ellipsis,
                                                     )
+                                                }
+                                            }
+                                            Spacer(Modifier.height(8.dp))
+                                        }
+                                        // ★★ 本轮**工具调用过程**回放 (2026-10-05) —— 用户原话:
+                                        //   「我的过程指的是像 workbuddy 或者 ima 一样展示中间思考的内容
+                                        //   **和调用的工具**」。流式期间那份实时时间线收尾就清了, 这里把
+                                        //   随消息落盘的那份(`m.toolTimeline`)折叠展开, 回头看也能查。
+                                        //   ⚠️ 默认**收起**: 过程是"想细看才看"的东西, 摊开会喧宾夺主;
+                                        //      而下面那几行汇总(智能搜索/查阅百科/核对语法)已经给了概览。
+                                        //   ⚠️ 老会话没有这个键 → `.orEmpty()`。
+                                        val timeline = m.toolTimeline.orEmpty()
+                                        if (!mine && timeline.isNotEmpty()) {
+                                            var open by remember(timeline) { mutableStateOf(false) }
+                                            Surface(
+                                                color = MaterialTheme.colorScheme.surfaceVariant,
+                                                shape = RoundedCornerShape(8.dp),
+                                                modifier = Modifier.fillMaxWidth()
+                                                    .clickable { open = !open },
+                                            ) {
+                                                Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                                                            null,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(14.dp),
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Icon(
+                                                            Icons.Default.Terminal, null,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            modifier = Modifier.size(14.dp),
+                                                        )
+                                                        Spacer(Modifier.width(4.dp))
+                                                        Text(
+                                                            "调用过程 · ${timeline.size} 步",
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                    if (open) {
+                                                        Spacer(Modifier.height(6.dp))
+                                                        // cid 只用于"还在跑的条目"算耗时; 这些都已结束, 传空无妨
+                                                        AiTimeline("", timeline)
+                                                    }
                                                 }
                                             }
                                             Spacer(Modifier.height(8.dp))
@@ -857,6 +1028,12 @@ fun AiScreen(nav: NavHostController) {
                                                 //   否则会把整份文件正文灌进输入框(几万字), 没法改。
                                                 input = AiAttach.displayText(m.content)
                                                 attachDraft = m.attachments.orEmpty()
+                                                // ★★ 2026-10-05: 旧的一轮**暂存**起来, 不再直接丢 ——
+                                                //   重发成功后它会作为「第 1 版」并回去, 气泡下方出现
+                                                //   `‹ 1/2 ›` 可以翻回来看 (用户要的 DeepSeek 行为)。
+                                                pendingPrev = messages.getOrNull(idx + 1)
+                                                    ?.takeIf { it.role == "assistant" }
+                                                pendingPrevUser = m.content
                                                 setMessages(messages.take(idx))
                                                 android.widget.Toast.makeText(
                                                     ctx, "已放回输入框，改完重新发送",
@@ -933,6 +1110,18 @@ fun AiScreen(nav: NavHostController) {
                                                 modifier = Modifier.size(15.dp))
                                         }
                                     }
+                                    // ★★ 回答版本切换 `‹ 1/2 ›` (2026-10-05) —— 用户原话:
+                                    //   「像 deepseek 一样有个 1/2，2/2 一样表示修改的次数还有每次的内容」。
+                                    //   「重新生成」/「修改后重发」产生的每一版都留在这里, 可左右翻。
+                                    if (m.versionCount > 1) {
+                                        Spacer(Modifier.width(8.dp))
+                                        VersionSwitcher(
+                                            index = m.variantIndex,
+                                            total = m.versionCount,
+                                            onPrev = { doSwitchVariant(idx, m.variantIndex - 1) },
+                                            onNext = { doSwitchVariant(idx, m.variantIndex + 1) },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -947,6 +1136,13 @@ fun AiScreen(nav: NavHostController) {
                         item {
                             val cid = cur?.id ?: ""
                             val stream = AiTaskRunner.streamFor(cid)
+                            // ★★ 实时思考正文 (2026-10-05) —— 用户原话: "我的过程指的是像 workbuddy
+                            //   或者 ima 一样**展示中间思考的内容**和调用的工具"。
+                            //   与 stream(最终答案) 并列, 这是模型"在想什么"的实时推理内容。
+                            //   上游不返回思考的模型这里一直是空串, 下面的块自然不显示。
+                            val think = AiTaskRunner.thinkFor(cid)
+                            // ★ 结构化工具时间线 —— 生成期间**也保持可见**(原来是"有正文就塌成一行")。
+                            val timeline = AiTaskRunner.toolEventsFor(cid)
                             // ★ 过程步骤 (2026-10-02): 用户原话"在思考过程和调用工具的过程中应该
                             //   让用户知道 AI 在动, 展示过程"。只转圈是不够的 —— 用户不知道它是在
                             //   查百科、在核语法、还是在干等。最新的在最后, 只露最近 5 条。
@@ -955,43 +1151,13 @@ fun AiScreen(nav: NavHostController) {
                             //    挂在这儿的话, 气泡一旦在视口外就不会组合, 永远不会执行。
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Start) {
                                 Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-                                    if (stream.isNotBlank()) {
-                                        // ★★ 流式期间**也走 Markdown 渲染** (2026-10-02 十一批)。
-                                        //   用户原话:「在流式输出时 markdown 不渲染，输出完整后才会渲染，修」。
-                                        //
-                                        //   原来这里刻意用**纯 Text**, 理由是"每 80ms 重解析一次 Markdown 会掉帧"。
-                                        //   那个顾虑是错的 —— 代价是流式那几秒里 `**粗体**`、` ``` ` 围栏、
-                                        //   `# 标题` 全是**字面符号**, 用户盯着满屏星号和反引号看十几秒,
-                                        //   比偶尔掉一帧难受得多。而且解析本身是纯字符串处理 + `remember(text)`
-                                        //   缓存(见 MarkdownText/MarkdownBlocks), 一次几毫秒, 真正的开销在布局上,
-                                        //   那是无论用什么渲染都躲不掉的。
-                                        //
-                                        //   ⚠️ 流式期间**不给上传回调** —— 指令可能还没写完, 「复制 / 上传」
-                                        //      等落盘后的正式气泡再出现。复制按钮仍在, 但内容是当时的快照。
-                                        //   ⚠️ 光标 `▌` 挪到下面那行状态文字上, **不要**拼进正文 ——
-                                        //      正文结尾若是个未闭合的 ``` 围栏, `▌` 会被当成代码内容渲染进去。
-                                        Column(Modifier.padding(12.dp)) {
-                                            // 已经开始吐正文了, 但步骤还没走完(可能后面还要复查) —— 留一行痕迹
-                                            if (steps.isNotEmpty()) {
-                                                Text(
-                                                    steps.last(),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                Spacer(Modifier.height(6.dp))
-                                            }
-                                            MarkdownBlocks(stream, style = MaterialTheme.typography.bodyMedium)
-                                            Spacer(Modifier.height(6.dp))
-                                            Text(
-                                                "▌ 生成中 · 已 ${AiTaskRunner.elapsedText(cid)}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    } else {
-                                        Column(Modifier.padding(12.dp)) {
+                                    // ★★ 统一成一条 Column (2026-10-05): 顺序与 WorkBuddy / ima 一致 ——
+                                    //   「状态 → 思考 → 工具 → 正文」。原来正文与过程是**互斥**的两块
+                                    //   (`if (stream.isNotBlank())` 一开, 时间线整块就没了), 用户看到的是
+                                    //   "一吐字, 刚才查过什么全消失", 这正是他要修的地方。
+                                    Column(Modifier.padding(12.dp)) {
+                                        // ---- ① 还没吐正文 → 转圈 + 阶段 + 已等时长 ----
+                                        if (stream.isBlank()) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
                                                 Spacer(Modifier.width(8.dp))
@@ -1002,42 +1168,93 @@ fun AiScreen(nav: NavHostController) {
                                                     style = MaterialTheme.typography.bodySmall,
                                                 )
                                             }
-                                            // ★★ 全程实时时间线 (2026-10-05) —— 用户原话:
-                                            //   「要把 AI 在中间使用工具、然后输出的内容什么的完整过程也输出出来」。
-                                            //
-                                            //   优先用**结构化**事件(toolEventsFor): 每条能表达状态(在跑/成功/失败)、
-                                            //   耗时、以及"哪几条是同时跑的"。拿不到结构化事件时才退回旧的纯文本行。
-                                            val timeline = AiTaskRunner.toolEventsFor(cid)
-                                            if (timeline.isNotEmpty()) {
-                                                Spacer(Modifier.height(8.dp))
-                                                AiTimeline(cid, timeline)
-                                            } else if (steps.isNotEmpty()) {
-                                                // 旧路径兜底 —— 只有一行字可用时(理论上不会走到, 防御性保留)
-                                                Spacer(Modifier.height(6.dp))
-                                                steps.forEachIndexed { i, s ->
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Text(
-                                                            if (i == steps.lastIndex) "▸ " else "· ",
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = MaterialTheme.colorScheme.primary,
-                                                        )
-                                                        Text(
-                                                            s,
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            color = if (i == steps.lastIndex)
-                                                                MaterialTheme.colorScheme.primary
-                                                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            maxLines = 1,
-                                                            overflow = TextOverflow.Ellipsis,
-                                                        )
-                                                    }
+                                        }
+
+                                        // ---- ② 实时思考块 (推理正文, 边想边长) ----
+                                        if (think.isNotBlank()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            LiveThinkBlock(think, streaming = stream.isBlank())
+                                        }
+
+                                        // ---- ③ 工具调用时间线 (全程可见) ----
+                                        if (timeline.isNotEmpty()) {
+                                            Spacer(Modifier.height(8.dp))
+                                            AiTimeline(cid, timeline)
+                                        } else if (steps.isNotEmpty() && stream.isBlank()) {
+                                            // 旧路径兜底 —— 只有一行字可用时(理论上不会走到, 防御性保留)
+                                            Spacer(Modifier.height(6.dp))
+                                            steps.forEachIndexed { i, s ->
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Text(
+                                                        if (i == steps.lastIndex) "▸ " else "· ",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.primary,
+                                                    )
+                                                    Text(
+                                                        s,
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = if (i == steps.lastIndex)
+                                                            MaterialTheme.colorScheme.primary
+                                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis,
+                                                    )
                                                 }
                                             }
+                                        }
+
+                                        // ---- ④ 答案正文 (已开始吐字时) ----
+                                        if (stream.isNotBlank()) {
+                                            // ★★ 流式期间**也走 Markdown 渲染** (2026-10-02 十一批)。
+                                            //   用户原话:「在流式输出时 markdown 不渲染，输出完整后才会渲染，修」。
+                                            //
+                                            //   原来这里刻意用**纯 Text**, 理由是"每 80ms 重解析一次 Markdown 会掉帧"。
+                                            //   那个顾虑是错的 —— 代价是流式那几秒里 `**粗体**`、` ``` ` 围栏、
+                                            //   `# 标题` 全是**字面符号**, 用户盯着满屏星号和反引号看十几秒,
+                                            //   比偶尔掉一帧难受得多。而且解析本身是纯字符串处理 + `remember(text)`
+                                            //   缓存(见 MarkdownText/MarkdownBlocks), 一次几毫秒, 真正的开销在布局上,
+                                            //   那是无论用什么渲染都躲不掉的。
+                                            //
+                                            //   ⚠️ 流式期间**不给上传回调** —— 指令可能还没写完, 「复制 / 上传」
+                                            //      等落盘后的正式气泡再出现。复制按钮仍在, 但内容是当时的快照。
+                                            //   ⚠️ 光标 `▌` 挪到下面那行状态文字上, **不要**拼进正文 ——
+                                            //      正文结尾若是个未闭合的 ``` 围栏, `▌` 会被当成代码内容渲染进去。
+                                            Spacer(Modifier.height(8.dp))
+                                            MarkdownBlocks(stream, style = MaterialTheme.typography.bodyMedium)
+                                            Spacer(Modifier.height(6.dp))
+                                            Text(
+                                                "▌ 生成中 · 已 ${AiTaskRunner.elapsedText(cid)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
                                         }
                                     }
                                 }
                             }
                         }
+                    }
+                }
+
+                // ★★ 「回到底部」(2026-10-05) —— 配合上面的"手动上翻就停止自动跟随"。
+                //
+                // 自动跟随停下来之后, 用户总得有条**一键回去**的路; 否则长回答里要自己
+                // 一路滑到底, 非常难受。所有成熟客户端都有这个按钮, 位置也都在输入框正上方。
+                // ⚠️ 用 inputBarH 抬起, 免得被浮在列表之上的输入条盖住。
+                if (!atBottom) {
+                    Surface(
+                        onClick = { scope.launch { scrollToBottom() } },
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 14.dp, bottom = inputBarH + 14.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown, "回到底部",
+                            modifier = Modifier.padding(8.dp).size(20.dp),
+                        )
                     }
                 }
 
@@ -1135,19 +1352,27 @@ fun AiScreen(nav: NavHostController) {
                                 // ★ 官方 LiquidButton (逐字搬运见 ui/liquidglass/, Apache-2.0)。
                                 //   等宽高 + Capsule() 就是正圆; 强调色照官方 demo 的写法: tint + 白色内容。
                                 //   官方没有 enabled 参数, 禁用态靠 isInteractive=false + 自己拦 onClick。
+                                //
+                                // ★ 2026-10-05: 在跑时这个键变「停止生成」—— 用 error 色(红)区分,
+                                //   图标换成实心方块。仍然 isInteractive, 所以**点得动**(不再是灰的)。
+                                val primaryOn = busyNow || sendEnabled
                                 LiquidButton(
-                                    onClick = { if (sendEnabled) doSend() },
+                                    onClick = onPrimaryAction,
                                     backdrop = inputBackdrop,
                                     modifier = Modifier.size(44.dp),
-                                    isInteractive = sendEnabled,
+                                    isInteractive = primaryOn,
                                     height = 44.dp,
                                     contentPadding = 0.dp,
-                                    tint = if (sendEnabled) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.surfaceVariant,
+                                    tint = when {
+                                        busyNow -> MaterialTheme.colorScheme.error
+                                        sendEnabled -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.surfaceVariant
+                                    },
                                 ) {
                                     Icon(
-                                        Icons.Default.Send, "发送",
-                                        tint = if (sendEnabled) Color.White
+                                        if (busyNow) Icons.Default.Stop else Icons.Default.Send,
+                                        if (busyNow) "停止生成" else "发送",
+                                        tint = if (primaryOn) Color.White
                                         else MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
@@ -1220,7 +1445,18 @@ fun AiScreen(nav: NavHostController) {
                                 modifier = Modifier.weight(1f),
                                 maxLines = 3,
                             )
-                            IconButton(enabled = sendEnabled, onClick = doSend) { Icon(Icons.Default.Send, "发送") }
+                            // ★ 2026-10-05: 在跑时变成「停止生成」(与玻璃分支逐字对齐)
+                            IconButton(
+                                onClick = onPrimaryAction,
+                                enabled = busyNow || sendEnabled,
+                            ) {
+                                Icon(
+                                    if (busyNow) Icons.Default.Stop else Icons.Default.Send,
+                                    if (busyNow) "停止生成" else "发送",
+                                    tint = if (busyNow) MaterialTheme.colorScheme.error
+                                    else androidx.compose.ui.graphics.Color.Unspecified,
+                                )
+                            }
                         }
                     }
                 }
@@ -1365,6 +1601,71 @@ private fun AiToolChips(
 }
 
 /**
+ * ★★ **实时思考块** —— 把模型的推理正文(`reasoning_content`)**边想边**画出来 (2026-10-05)。
+ *
+ * 用户原话:「我的过程指的是像 workbuddy 或者 ima 一样**展示中间思考的内容**和调用的工具」。
+ * 与"工具时间线"([AiTimeline]) 是**两块不同的东西**, 一起构成"完整过程":
+ *   · 本块 = 模型**在想什么**(推理正文, 会一段段长出来)
+ *   · [AiTimeline] = 模型**做了什么**(调了哪些工具、查得怎么样)
+ *
+ * ## 为什么默认**展开**
+ * 用户要的就是"看得到它在想什么"。默认收起来等于没做 —— 他得再点一下才能看到,
+ * 而流式输出本来就是"盯着看它动"。所以默认 `open = true`。
+ *
+ * ## ⚠️ 为什么这里用**纯 Text** 而不是 [MarkdownText]
+ * 思考正文每 ~90ms 就长一截, 而 [MarkdownText] 的 `remember(text)` 会在 text 每次变化时
+ * **把整段重新解析一遍**(单次 O(n), 整段流下来 O(n²))。推理动辄几千字, 长推理下会明显掉帧。
+ * 而推理正文本身基本是纯文字, 不需要 Markdown 渲染 —— 纯 Text 又快又不会误吃 `**` 这类符号。
+ * (最终落盘后的 `m.think` 那条折叠块才用 [MarkdownText] —— 那时只解析一次, 无所谓。)
+ *
+ * @param text      已经收到的思考正文(增量累加的结果)
+ * @param streaming 是否还在流 —— 决定标题写「正在思考…」还是「思考过程 · N 字」
+ */
+@Composable
+private fun LiveThinkBlock(text: String, streaming: Boolean) {
+    // ⚠️ 不把 text 作为 key: 用户手动收起后, 新的增量不该把块又弹开。
+    var open by remember { mutableStateOf(true) }
+    Surface(
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        shape = RoundedCornerShape(8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { open = !open },
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 6.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    if (open) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                    null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Icon(
+                    Icons.Default.Psychology, null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(14.dp),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    if (streaming) "正在思考…" else "思考过程 · ${text.length} 字",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (open) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
  * **全程实时时间线** —— 把 AI 这一轮里每一次工具调用 / 每一次复查完整摊开 (2026-10-05)。
  *
  * 用户原话:「要把 AI 在中间使用工具、然后输出的内容什么的完整过程也输出出来，
@@ -1455,6 +1756,51 @@ private fun AiTimeline(cid: String, events: List<AiToolEvent>) {
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * ★★ **回答版本切换器** —— DeepSeek 那个 `‹ 1/2 ›` (2026-10-05)。
+ *
+ * 用户原话:「修改的那个功能，像 deepseek 一样有个 1/2，2/2 一样表示修改的次数
+ * 还有每次的内容」。
+ *
+ * 「重新生成」/「修改后重发」会为同一条回答攒下多版(见 [UiMsg.variants]),
+ * 这个胶囊就是用来翻的: 左边箭头回上一版, 中间显示 `当前版/总版数`, 右边箭头去下一版。
+ *
+ * ⚠️ 到头的那个箭头要**置灰**(不是隐藏) —— 隐藏会让胶囊宽度忽宽忽窄, 点的时候位置一直在变。
+ * ⚠️ 只有一版时**整块不渲染**(调用点判的), 免得每条回答都挂个没用的 `1/1`。
+ */
+@Composable
+private fun VersionSwitcher(index: Int, total: Int, onPrev: () -> Unit, onNext: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onPrev, enabled = index > 0, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Default.ChevronLeft, "上一版",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (index > 0) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.outline,
+                )
+            }
+            Text(
+                "${index + 1}/$total",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(onClick = onNext, enabled = index < total - 1, modifier = Modifier.size(28.dp)) {
+                Icon(
+                    Icons.Default.ChevronRight, "下一版",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (index < total - 1) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.outline,
+                )
             }
         }
     }

@@ -90,9 +90,13 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
     var lastTapAt by remember { mutableStateOf(0L) }
     var showCookieBox by remember { mutableStateOf(false) }
     var cookieInput by remember { mutableStateOf("") }
-    // 调试模式是否生效 —— 读取时机: 每次重组。调试模式只在调试面板里改, 回到登录页必然重组。
-    // ⚠️ 不用 remember 缓存: 用户"开调试模式 → 退出登录回登录页"这条路径必须立刻反映出来。
-    val cookieEntryOn = DebugStore.active
+    // ★★ 2026-10-05: 保存 cookie 时**当场换登录态** —— 用户原话「输进去能进行登陆就行」。
+    var cookieBusy by remember { mutableStateOf(false) }
+    var cookieMsg by remember { mutableStateOf("") }
+    // 调试模式是否生效 —— 读 [DebugStore.activeState] 而不是 [DebugStore.active]:
+    // 前者是 Compose 可观察的, 在调试面板里开关一改、回到登录页立刻反映;
+    // 后者读 SharedPreferences, 订阅不到变化(在返回栈里的页面会一直显示旧状态)。
+    val cookieEntryOn = DebugStore.activeState
 
     /** 点一下图标。调试模式开着时, 满 10 下弹框; 超时则重新计数。
      *
@@ -216,11 +220,11 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
         val saved = Session.cookie
         AlertDialog(
             onDismissRequest = { showCookieBox = false },
-            title = { Text(if (saved == null) "Cookie 登录" else "Cookie 已设置") },
+            title = { Text(if (saved == null) "导入登录态" else "Cookie 已设置") },
             text = {
                 Column {
                     Text(
-                        if (saved == null) "粘贴浏览器里已登录的 Cookie（形如 a=1; b=2；整行 Cookie: 也行）。"
+                        if (saved == null) "粘贴调试面板「导出登录态」得到的内容，或浏览器里已登录的 Cookie（形如 a=1; b=2）。令牌与 Cookie 都能识别。"
                         else "当前已注入 cookie（${saved.length} 字符）。重新粘贴可覆盖，或点「清除」。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -245,30 +249,66 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error,
                     )
+                    if (cookieBusy || cookieMsg.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (cookieBusy) {
+                                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text(
+                                if (cookieBusy) "正在用 Cookie 登录…" else cookieMsg,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (cookieMsg.startsWith("✅")) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.error,
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
                 androidx.compose.material3.TextButton(
-                    // 「调试用的不用给提示」—— 保存后静默关框, 不弹 Toast。
+                    enabled = !cookieBusy,
+                    // 「调试用的不用给提示」—— 成功则静默关框; 失败**必须**说原因,
+                    // 否则用户不知道是 cookie 不对还是功能没生效(这正是本次要修的问题)。
                     onClick = {
-                        val clean = Session.sanitizeCookie(cookieInput)
-                        if (clean.isNotBlank()) Session.cookie = clean
-                        // ★ 必须重建客户端: cookie 拦截器虽然每次请求现读 Session.cookie,
-                        //   但已建好的 client 里 DebugStore.active 是在**拦截器执行时**判的,
-                        //   重建一次最稳, 也顺带刷新日志。不解这一行会踩"改完没生效"的坑。
-                        ApiClient.reset()
-                        showCookieBox = false
+                        // ★ 2026-10-05: 不再自己 sanitize 后就当 cookie 存 —— 交给
+                        //   [AppState.importLoginState] 统一解析。这样这里**令牌和 Cookie 都能收**,
+                        //   与调试面板的「导入登录态」行为一致(用户从那边导出的东西能直接粘这里)。
+                        scope.launch {
+                            cookieBusy = true
+                            cookieMsg = ""
+                            val r = AppState.importLoginState(cookieInput)
+                            cookieBusy = false
+                            if (r.isSuccess) {
+                                val u = r.getOrNull()
+                                cookieInput = ""
+                                cookieMsg = "✅ 已登录：${u?.nickname ?: u?.username ?: "当前账号"}"
+                                showCookieBox = false
+                                // 门禁模式下登录态一变就会自动放行(见外层门禁判定)
+                            } else {
+                                cookieMsg = "❌ 未能登录：" +
+                                    (r.exceptionOrNull()?.message ?: "未知原因")
+                            }
+                        }
                     },
-                ) { Text("保存") }
+                ) { Text(if (cookieBusy) "登录中…" else "保存并登录") }
             },
             dismissButton = {
                 Row {
                     if (saved != null) {
                         androidx.compose.material3.TextButton(
-                            onClick = { Session.clearCookie(); ApiClient.reset(); showCookieBox = false },
+                            enabled = !cookieBusy,
+                            onClick = {
+                                Session.clearCookie(); ApiClient.reset()
+                                cookieMsg = ""; showCookieBox = false
+                            },
                         ) { Text("清除", color = MaterialTheme.colorScheme.error) }
                     }
-                    androidx.compose.material3.TextButton(onClick = { showCookieBox = false }) { Text("取消") }
+                    androidx.compose.material3.TextButton(
+                        enabled = !cookieBusy,
+                        onClick = { cookieMsg = ""; showCookieBox = false },
+                    ) { Text("取消") }
                 }
             },
         )
@@ -439,17 +479,22 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
                         joinQqGroup(ctx)
                     },
             )
-            // ★★ 调试模式专属: Cookie 登录入口 (2026-10-05)
+            // ★★ 调试模式专属: 登录态导入入口 (2026-10-05)
             //
             // 用户原话:「cookie 你就应该在开启调试模式的时候直接开启…调试模式关闭时也要同时
             //   隐藏入口，类似安卓开发者模式一样」。
             // 所以:**调试模式开着才出现**, 关着时这整块不存在 —— 不是藏起来, 是没了。
+            //
+            // ★ 2026-10-05 改名「Cookie 登录」→「导入登录态」: 实测服务器不下发 Set-Cookie,
+            //   光叫 Cookie 会让用户以为"只有 cookie 能用", 而真正能复用登录的其实是令牌。
+            //   现在这里令牌与 Cookie 都收, 与调试面板的导出格式一一对应。
             //
             // 样式刻意做得像"调试工具"而非普通登录方式: 深色描边 + 小字说明,
             // 免得用户误以为这是给所有人的登录入口。
             if (cookieEntryOn) {
                 Spacer(Modifier.height(10.dp))
                 val cookieSaved = Session.hasCookie()
+                val tokenSaved = Session.realToken() != null
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
@@ -459,17 +504,20 @@ fun AuthScreen(nav: NavHostController, asGate: Boolean = false) {
                         .padding(horizontal = 14.dp, vertical = 9.dp),
                 ) {
                     Icon(
-                        if (cookieSaved) Icons.Default.CheckCircle else Icons.Default.Lock,
+                        if (cookieSaved || tokenSaved) Icons.Default.CheckCircle else Icons.Default.Lock,
                         contentDescription = null,
-                        tint = if (cookieSaved) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.6f),
+                        tint = if (cookieSaved || tokenSaved) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.6f),
                         modifier = Modifier.size(15.dp),
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(
-                        if (cookieSaved) "Cookie 已注入（${Session.cookie?.length ?: 0} 字符）· 点击修改"
-                        else "Cookie 登录（调试模式）",
+                        when {
+                            cookieSaved -> "已注入 Cookie（${Session.cookie?.length ?: 0} 字符）· 点击修改"
+                            tokenSaved -> "令牌登录中 · 点击导入其它登录态"
+                            else -> "导入登录态（调试模式）"
+                        },
                         fontSize = 12.sp,
-                        color = if (cookieSaved) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.85f),
+                        color = if (cookieSaved || tokenSaved) Color(0xFF4ADE80) else Color.White.copy(alpha = 0.85f),
                     )
                 }
             }

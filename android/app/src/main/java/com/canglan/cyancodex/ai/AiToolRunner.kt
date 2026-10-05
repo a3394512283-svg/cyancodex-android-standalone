@@ -156,17 +156,29 @@ object AiToolRunner {
                            else AiSearch.buildWikiToolResult(hits)
                     // ★ 多源时把各源命中数写进摘要 —— 这正是用户要的"过程可见"。
                     //   只报一个总数的话, 用户不知道维基百科那条到底通没通。
+                    //
+                    // ★★ 2026-10-05: **失败的源要标出来 + 带上原因**。用户原话:
+                    //   「超时后返回 xx接口超时，原因为xxx（境外接口连接过慢）」。
+                    //   ⚠️ 原来最后那句 `if (!ok) summary = "所有知识源都没有命中"` 会把
+                    //      逐源明细**整个盖掉** —— 用户看到"都没命中"以为是站点没资料,
+                    //      真相是维基百科根本没连上。所以现在只在"没有任何失败原因"时才用它兜底。
                     summary = if (wikiMulti) {
                         val stats = AiSearch.lastSourceHits()
-                        AiSearch.SOURCES.joinToString(" · ") { s ->
-                            "${s.name.removePrefix("MC百科·").removePrefix("MC Wiki·")}" +
-                                "${stats[s.id] ?: 0}"
-                        } + "（共 ${hits.size} 条）"
+                        val errs = AiSearch.lastSourceErrors()
+                        val per = AiSearch.SOURCES.joinToString(" · ") { s ->
+                            val short = s.name.removePrefix("MC百科·").removePrefix("MC Wiki·")
+                            // ✗ = 这个源没连上(区别于"0 条 = 连上了但没这条目")
+                            if (errs.containsKey(s.id)) "$short✗" else "$short${stats[s.id] ?: 0}"
+                        }
+                        val base = "$per（共 ${hits.size} 条）"
+                        if (errs.isEmpty()) base
+                        else base + " · 未取到：" + errs.entries.joinToString("；") { (id, why) ->
+                            "${AiSearch.sourceName(id)}$why"
+                        }
                     } else {
-                        "命中 ${hits.size} 条"
+                        if (hits.isEmpty()) "没有搜到相关条目" else "命中 ${hits.size} 条"
                     }
                     ok = hits.isNotEmpty()
-                    if (!ok) summary = "所有知识源都没有命中"
                 }
 
                 c.name == TOOL_CHECK -> {
@@ -248,9 +260,21 @@ object AiToolRunner {
      */
     private fun toolErrText(name: String, e: Exception): String {
         val why = e.message?.take(120) ?: e.javaClass.simpleName
+        // ★ 2026-10-05: 超时要**点名原因** —— 用户要的文案是
+        //   「xx接口超时，原因为xxx（境外接口连接过慢）」。区分"超时"与"没搜到"
+        //   是为了让模型换策略: 超时 → 凭已有知识答并说明未查到; 没搜到 → 换关键词。
+        val timeout = e is java.net.SocketTimeoutException ||
+            e is java.io.InterruptedIOException ||
+            why.contains("timeout", ignoreCase = true) ||
+            why.contains("超时")
         return when (name) {
-            TOOL_SEARCH -> "搜索失败：$why。请换一组关键词重试，或直接凭已有知识回答。"
-            TOOL_WIKI -> "知识源检索失败：$why。请凭已有知识回答，并在回答里说明未能查到资料。"
+            TOOL_SEARCH -> if (timeout)
+                "搜索接口超时，原因为连接超时（境外接口连接过慢）。请直接凭已有知识回答，不要编造来源。"
+            else "搜索失败：$why。请换一组关键词重试，或直接凭已有知识回答。"
+            TOOL_WIKI -> if (timeout)
+                "知识源接口超时，原因为连接超时（境外接口连接过慢）。请凭已有知识回答，" +
+                    "并在回答里如实说明未能查到资料，**不要编造**条目内容。"
+            else "知识源检索失败：$why。请凭已有知识回答，并在回答里说明未能查到资料。"
             TOOL_CHECK -> "语法核对失败：$why。请自行仔细检查语法后再输出。"
             else -> "工具执行失败：$why"
         }

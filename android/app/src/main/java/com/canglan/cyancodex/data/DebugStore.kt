@@ -35,6 +35,10 @@ object DebugStore {
     /** 调 [Session.init] 时一并初始化（共用同一份 SharedPreferences）。 */
     fun attach(prefs: SharedPreferences) {
         sp = prefs
+        // ★ 同步 Compose 可观察镜像 —— 见 [unlockedState] / [masterState]。
+        //   放在这里是因为 attach 是"SP 就绪"的唯一时刻, 之后再没有初始化窗口。
+        unlockedState.value = runCatching { sp.getBoolean(K_UNLOCKED, false) }.getOrDefault(false)
+        masterState.value = runCatching { sp.getBoolean(K_MASTER, true) }.getOrDefault(true)
     }
 
     private val ensure: SharedPreferences
@@ -70,10 +74,46 @@ object DebugStore {
      */
     var masterOn: Boolean
         get() = runCatching { ensure.getBoolean(K_MASTER, true) }.getOrDefault(true)
-        set(v) { runCatching { ensure.edit().putBoolean(K_MASTER, v).apply() } }
+        set(v) {
+            runCatching { ensure.edit().putBoolean(K_MASTER, v).apply() }
+            // ★ 同步可观察镜像 —— 否则设置页那个"调试"入口不会随开关消失/出现
+            masterState.value = v
+        }
+
+    /**
+     * ★★ **总开关的 Compose 可观察镜像** (2026-10-05 修 bug)。
+     *
+     * 为什么必须有它: SharedPreferences **不是** Compose 可观察对象。
+     * 原来设置页写的是 `remember { mutableStateOf(DebugStore.unlocked) }` —— 那是个
+     * **一次性快照**, 用户在调试面板里关掉总开关再返回, 设置页的"调试"入口**照样在**
+     * (用户报的正是这个: 「我不是说把调试模式关上设置底下的调试就自动隐藏吗」)。
+     *
+     * 有了它, `DebugStore.activeState` 被 Composable 直接读, 开关一改就重组。
+     */
+    val masterState = mutableStateOf(true)
+
+    /**
+     * ★★ **解锁态的 Compose 可观察镜像** (2026-10-05)。
+     *
+     * 关于页连点 7 次解锁后, 设置页要**立刻**出现"调试"入口 —— 只写 SP 是不够的,
+     * 设置页可能已经在返回栈里活着(它的 composition 还在), 读不到新值。
+     */
+    val unlockedState = mutableStateOf(false)
 
     /** 调试能力**当下是否真的生效** —— 解锁 且 总开关开着。所有调试功能都该判它, 而不是 [unlocked]。 */
     val active: Boolean get() = unlocked && masterOn
+
+    /**
+     * ★★ **[active] 的 Compose 可观察版本** —— **UI 一律用这个**。
+     *
+     * 语义与 [active] 完全一致, 区别只在"读它会被 Compose 订阅重组"。
+     * 逻辑判定(拦截器、日志、请求记录)继续用 [active] —— 那些不在组合里跑, 不需要可观察性,
+     * 而且每次都读 SP 才是它们想要的"绝对最新"。
+     *
+     * ⛔ 别在 Composable 里读 [active]: 它读 SharedPreferences, 而组合函数会被反复调用 ——
+     *    等于每帧读一次磁盘(虽然 SP 有内存缓存, 但订阅不到变化, 表现就是"改了界面不刷新")。
+     */
+    val activeState: Boolean get() = unlockedState.value && masterState.value
 
     /**
      * ★★ **Cookie 功能是否可用** —— 2026-10-05 用户要求:
@@ -93,7 +133,10 @@ object DebugStore {
     /** 是否已解锁调试模式（连点版本号 7 次）。 */
     var unlocked: Boolean
         get() = runCatching { ensure.getBoolean(K_UNLOCKED, false) }.getOrDefault(false)
-        set(v) { runCatching { ensure.edit().putBoolean(K_UNLOCKED, v).apply() } }
+        set(v) {
+            runCatching { ensure.edit().putBoolean(K_UNLOCKED, v).apply() }
+            unlockedState.value = v     // ★ 同步可观察镜像, 见 [unlockedState]
+        }
 
     /** 是否开启日志记录（默认开；只有在解锁后才真正往缓冲里写）。 */
     var logEnabled: Boolean
@@ -231,6 +274,7 @@ object DebugStore {
         //   打进去就是主动泄露。要导出 cookie 的话走面板上那个专门的「导出 Cookie」按钮,
         //   那个至少是用户明确知道自己导出的是什么。
         sb.append("Cookie 注入: ").append(cookieStatusText()).append('\n')
+        sb.append("登录态: ").append(runCatching { Session.loginStateSummary().replace('\n', ' ') }.getOrDefault("读取失败")).append('\n')
         sb.append('\n')
         sb.append("--- 日志 (").append(_logs.size).append(") ---\n")
         _logs.forEach { sb.append(it).append('\n') }
@@ -251,16 +295,20 @@ object DebugStore {
     }.getOrDefault("读取失败")
 
     /**
-     * **导出 cookie 原文** —— 用户明确点「导出 Cookie」按钮时才调 (2026-10-05)。
+     * **导出登录态原文** —— 用户明确点「导出登录态」按钮时才调 (2026-10-05)。
      *
-     * 用户原话:「导出 cookie 在调试里面」—— 要把 App 里注入的 cookie 拷出来
-     * (换设备、贴进浏览器、抓包对比)。
+     * ⛔ 2026-10-05 改名 + 改语义: 原来叫 `exportCookie()` 且**只**返回 `Session.cookie`。
+     *    但实测服务器**不下发 Set-Cookie**, 密码登录的会话里 cookie 恒为空 ——
+     *    于是"登录状态下导出"永远是空串, 用户报「导出不了」。
+     *    现在改为导出**整个登录态**(token 优先, cookie 有就一并带上),
+     *    语义对齐用户那句话: 「我的 cookie 是指登录态之类的, 反正输进去能进行登陆就行」。
+     *    详见 [Session.exportLoginState]。
      *
-     * ⚠️ 返回原文是**有意的**, 这与"日志永不打印 cookie"不矛盾:
+     * ⚠️ 返回原文是**有意的**, 这与"日志永不打印凭证"不矛盾:
      *   日志是**自动被动记录**(用户没主动要, 却可能随手贴出去);
      *   这里是**用户主动索取**(点了按钮, 且有二次确认)。两者风险面完全不同。
      */
-    fun exportCookie(): String = runCatching { Session.cookie ?: "" }.getOrDefault("")
+    fun exportLoginState(): String = runCatching { Session.exportLoginState() }.getOrDefault("")
 
     /** 面板顶部显示的当前生效地址（自定义优先）。 */
     fun currentBaseUrlDisplay(): String =

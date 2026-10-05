@@ -41,8 +41,10 @@ import androidx.navigation.NavHostController
 import com.canglan.cyancodex.data.ApiClient
 import com.canglan.cyancodex.data.DebugStore
 import com.canglan.cyancodex.data.Session
+import com.canglan.cyancodex.ui.AppState
 import com.canglan.cyancodex.ui.components.AppTopBar
 import com.canglan.cyancodex.ui.components.GlassActionButton
+import kotlinx.coroutines.launch
 import com.canglan.cyancodex.ui.components.GlassSwitch
 
 /**
@@ -93,14 +95,14 @@ fun DebugScreen(nav: NavHostController) {
                 Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("服务器") })
                 Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("日志 (${DebugStore.logs.size})") })
                 Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("请求 (${DebugStore.requests.size})") })
-                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("Cookie") })
+                Tab(selected = tab == 3, onClick = { tab = 3 }, text = { Text("登录态") })
             }
 
             when (tab) {
                 0 -> ServerTab(ctx)
                 1 -> LogTab(ctx)
                 2 -> RequestTab(ctx)
-                else -> CookieTab(ctx)
+                else -> LoginStateTab(ctx)
             }
         }
     }
@@ -148,15 +150,18 @@ private fun MasterSwitchCard(ctx: Context, on: Boolean, onChange: (Boolean) -> U
                     DebugStore.log("Debug", "调试模式 -> " + if (it) "开" else "关")
                     Toast.makeText(
                         ctx,
-                        if (it) "调试能力已启用（重启 App 后完全生效）"
-                        else "调试能力已关闭，已恢复默认行为",
-                        Toast.LENGTH_SHORT,
+                        if (it) "调试能力已启用"
+                        // ★ 2026-10-05: 明说"设置里的入口也会一起消失" —— 这是用户要的语义
+                        //   (「调试模式关上设置底下的调试就自动隐藏」), 也是安卓开发者选项的行为。
+                        //   并给出回来的路, 免得他以为把自己锁在外面了。
+                        else "调试能力已关闭，设置里的「调试」入口也已隐藏（在关于页点版本号可重新开启）",
+                        Toast.LENGTH_LONG,
                     ).show()
                 })
             }
             Text(
-                if (on) "服务器地址 / 路径改写 / Cookie 注入 / 日志记录 均已启用。"
-                else "全部暂停：App 走内置默认地址，不注入 Cookie，不记录日志。",
+                if (on) "服务器地址 / 路径改写 / 登录态注入 / 日志记录 均已启用。"
+                else "全部暂停：App 走内置默认地址，不注入 Cookie，不记录日志；设置页的「调试」入口同时隐藏。",
                 style = MaterialTheme.typography.labelSmall,
                 color = if (on) MaterialTheme.colorScheme.onPrimaryContainer
                 else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -165,25 +170,44 @@ private fun MasterSwitchCard(ctx: Context, on: Boolean, onChange: (Boolean) -> U
     }
 }
 
-// ======================= Cookie =======================
+// ======================= 登录态 =======================
 
 /**
- * **Cookie 标签页** (2026-10-05) —— 用户原话:「导出 cookie 在调试里面」。
+ * **登录态标签页** (2026-10-05 重写) —— 用户原话:「我的调试的 cookie 一直导出不了,
+ * 我的 cookie 是指登录态之类的, 反正输进去能进行登陆就行」。
+ *
+ * ## 为什么从「Cookie」改成「登录态」
+ * 2026-10-05 实测确认: **服务器从不下发 `Set-Cookie`**（`api/auth/captcha` 与
+ * `api/auth/login` 的响应头里都没有该字段），认证完全靠 `Authorization: Bearer <token>`。
+ * 也就是说 —— **用账号密码登录时, App 里根本不存在 cookie**。
+ * 原来那个「导出 Cookie」在这种状态下只能导出空串, 用户看到的就是
+ * 「登录状态下获取和重新登陆一次再获取都不行」。
+ *
+ * 用户对"cookie"的定义很朴素: 「登录态之类的」。所以这里统一按**登录态**处理 ——
+ * token 与 cookie 谁有导谁, 导入时自动识别。
  *
  * 四块:
- * 1. **注入** —— 直接在这里粘 cookie 保存 (2026-10-05 追加: 用户说「开调试模式就直开」,
- *    那调试面板自身当然要能输入, 不该只留登录页那个连点入口);
- * 2. **状态** —— 有没有注入、多少字符(永不显示原文, 除非用户点导出);
- * 3. **导出** —— 点了才把原文拷进剪贴板(带二次确认, 见按钮实现);
- * 4. **清除** —— 只清 cookie, 不动 token/用户信息。
+ * 1. **导入** —— 粘 token 或 cookie, 保存后**立即换登录态**(调 `me()` 真验, 不是假装成功);
+ * 2. **状态** —— 令牌/Cookie 各自有没有、多少字符（**永不显示原文**, 除非用户点导出）;
+ * 3. **导出** —— 点了才把登录态拷进剪贴板（换设备用）;
+ * 4. **清除** —— 只清 Cookie，不动令牌/用户信息。
  */
 @Composable
-private fun CookieTab(ctx: Context) {
-    // 用一个 tick 触发重算: 清除后要立刻反映到 UI 上
+private fun LoginStateTab(ctx: Context) {
+    // 用一个 tick 触发重算: 导入/清除后要立刻反映到 UI 上
     var tick by remember { mutableStateOf(0) }
-    val status = remember(tick) { DebugStore.cookieStatusText() }
-    val has = remember(tick) { runCatching { Session.hasCookie() }.getOrDefault(false) }
+    val summary = remember(tick) { Session.loginStateSummary() }
+    val hasCookie = remember(tick) { runCatching { Session.hasCookie() }.getOrDefault(false) }
+    val hasToken = remember(tick) { runCatching { Session.realToken() != null }.getOrDefault(false) }
+    val hasAny = hasCookie || hasToken
     var input by remember { mutableStateOf("") }
+    // ★★ 2026-10-05: 导入后**当场换登录态**的结果回显 —— 用户原话
+    //   「输进去能进行登陆就行」。不给反馈的话, 用户不知道到底登进去没有。
+    val scope = rememberCoroutineScope()
+    var busy by remember { mutableStateOf(false) }
+    var result by remember { mutableStateOf("") }
+    // 当前是不是"用 cookie 登录"的会话 —— 决定状态卡怎么描述
+    val cookieSession = remember(tick) { Session.token == Session.COOKIE_TOKEN }
 
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -191,17 +215,17 @@ private fun CookieTab(ctx: Context) {
     ) {
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("注入 Cookie", style = MaterialTheme.typography.titleSmall,
+                Text("导入登录态", style = MaterialTheme.typography.titleSmall,
                     color = MaterialTheme.colorScheme.primary)
-                Text("粘贴浏览器里已登录的 Cookie（整行 `Cookie: a=1; b=2` 或多行 `a=1` 都能吃下）。" +
-                    "保存后立即生效，无需重启。",
+                Text("粘贴本页「导出登录态」得到的内容，或浏览器里已登录的 Cookie（整行 `Cookie: a=1; b=2` " +
+                    "或多行 `a=1` 都能吃下）。\n令牌与 Cookie 都能识别；保存后会**立即向服务器验证并登录**，不是存下来就算。",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 OutlinedTextField(
                     value = input,
                     onValueChange = { input = it },
-                    label = { Text("Cookie") },
-                    placeholder = { Text("a=1; b=2") },
+                    label = { Text("令牌 或 Cookie") },
+                    placeholder = { Text("eyJhbGci… 或 a=1; b=2") },
                     modifier = Modifier.fillMaxWidth().heightIn(min = 90.dp),
                     maxLines = 6,
                     // ★ 密码型: 防肩窥与截屏外泄。这是账号级凭证, 不必常显。
@@ -211,23 +235,127 @@ private fun CookieTab(ctx: Context) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     GlassActionButton(
                         onClick = {
-                            val clean = Session.sanitizeCookie(input)
-                            if (clean.isBlank()) {
-                                Toast.makeText(ctx, "Cookie 为空（需要形如 a=1; b=2）", Toast.LENGTH_SHORT).show()
-                            } else {
-                                Session.cookie = clean
-                                ApiClient.reset()          // cookie 拦截器判 active, 重建一次最稳
-                                input = ""
+                            // ★ 2026-10-05: 不再自己 sanitize 后当 cookie 存 —— 交给
+                            //   [AppState.importLoginState] 统一解析(token / cookie / 带标签格式都行)。
+                            scope.launch {
+                                busy = true
+                                result = ""
+                                val r = AppState.importLoginState(input)
+                                busy = false
+                                val u = r.getOrNull()
+                                if (r.isSuccess) {
+                                    input = ""
+                                    result = "✅ 已登录：${u?.nickname ?: u?.username ?: "当前账号"}"
+                                } else {
+                                    result = "❌ 未能登录：" + (r.exceptionOrNull()?.message ?: "未知原因")
+                                }
                                 tick++
-                                DebugStore.log("Debug", "Cookie 已注入（${clean.length} 字符）")
-                                Toast.makeText(ctx, "Cookie 已保存并生效", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(
+                                    ctx,
+                                    if (r.isSuccess) "登录态导入成功" else "已保存，但登录未成功",
+                                    Toast.LENGTH_SHORT,
+                                ).show()
                             }
                         },
                         modifier = Modifier.weight(1f),
+                        enabled = !busy,
                     ) {
-                        Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                        if (busy) {
+                            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        } else {
+                            Icon(Icons.Default.Check, null, Modifier.size(16.dp))
+                        }
                         Spacer(Modifier.width(6.dp))
-                        Text("保存")
+                        Text(if (busy) "登录中…" else "导入并登录")
+                    }
+                    GlassActionButton(
+                        onClick = {
+                            Session.clearCookie()
+                            ApiClient.reset()
+                            tick++
+                            result = ""
+                            DebugStore.log("Debug", "Cookie 已清除")
+                            Toast.makeText(ctx, "已清除注入的 Cookie（令牌不受影响）", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f),
+                        enabled = hasCookie && !busy,
+                    ) {
+                        Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("清除 Cookie")
+                    }
+                }
+                if (result.isNotBlank()) {
+                    Text(
+                        result,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (result.startsWith("✅")) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("当前登录态", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (hasAny) Icons.Default.CheckCircle else Icons.Default.Lock, null,
+                        tint = if (hasAny) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(summary, style = MaterialTheme.typography.bodySmall)
+                }
+                Text("生效条件：调试模式开着（见顶部开关）且请求发往本 App 的官方服务器域名。\n" +
+                    "调试模式关掉后：Cookie 不再注入，登录页的导入入口也会同时消失。\n" +
+                    // ★ 2026-10-05: 说清"服务器不发 Set-Cookie"这件事 —— 用户报的
+                    //   "登录状态下导出不了"根源就在这里, 不解释清楚他会一直以为是 bug。
+                    "说明：本服务器认证用 `Authorization: Bearer <令牌>`，**不下发 Set-Cookie**；" +
+                    "所以账号密码登录时 App 里没有 Cookie，能复用的是**令牌**（见上面的「导出登录态」）。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (cookieSession) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("导出登录态", style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary)
+                Text("把当前登录凭证导出成一段文本，换设备时粘到「导入登录态」即可复用登录。\n" +
+                    "有令牌就导令牌，有 Cookie 就一并带上（两者都有时导出的是两行）。\n" +
+                    // ★ 2026-10-05: 用户报"导出不了"。真因是**旧版只导 Cookie, 而服务器不下发
+                    //   Set-Cookie** → 密码登录时永远是空串。现在改为导整个登录态, 并且
+                    //   按钮**永远可点**, 没内容就用 Toast 说清为什么。
+                    "「清除 Cookie」只清 Cookie，不影响令牌与用户信息。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    GlassActionButton(
+                        onClick = {
+                            val txt = DebugStore.exportLoginState()
+                            if (txt.isBlank()) {
+                                Toast.makeText(
+                                    ctx,
+                                    "当前没有可导出的登录态（未登录，且没有注入过 Cookie）",
+                                    Toast.LENGTH_LONG,
+                                ).show()
+                            } else {
+                                copyToClipboard(ctx, txt, "登录态已复制到剪贴板")
+                            }
+                        },
+                        modifier = Modifier.weight(1f),
+                        // ⛔ 不设 enabled —— 灰着的按钮会让用户以为"功能坏了"。
+                        //    永远可点, 没内容就用 Toast 说清楚。
+                    ) {
+                        Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("导出登录态")
                     }
                     GlassActionButton(
                         onClick = {
@@ -235,86 +363,21 @@ private fun CookieTab(ctx: Context) {
                             ApiClient.reset()
                             tick++
                             DebugStore.log("Debug", "Cookie 已清除")
-                            Toast.makeText(ctx, "已清除注入的 Cookie", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(ctx, "已清除注入的 Cookie（令牌不受影响）", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
-                        enabled = has,
+                        enabled = hasCookie,
                     ) {
                         Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("清除")
+                        Text("清除 Cookie")
                     }
                 }
             }
         }
 
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("注入状态", style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary)
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        if (has) Icons.Default.CheckCircle else Icons.Default.Lock, null,
-                        tint = if (has) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(status, style = MaterialTheme.typography.bodySmall)
-                }
-                Text("生效条件：调试模式开着（见顶部开关）且请求发往本 App 的官方服务器域名。\n" +
-                    "调试模式关掉后：Cookie 不再注入，登录页的 Cookie 入口也会同时消失。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-
-        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
-            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("导出 / 清除", style = MaterialTheme.typography.titleSmall,
-                    color = MaterialTheme.colorScheme.primary)
-                Text("「导出」会把注入的 Cookie 原文复制到剪贴板（换设备、贴进浏览器调试用）。\n" +
-                    "「清除」只清 Cookie，不影响登录状态与用户信息。",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    GlassActionButton(
-                        onClick = {
-                            val ck = DebugStore.exportCookie()
-                            if (ck.isBlank()) {
-                                Toast.makeText(ctx, "还没有注入 Cookie", Toast.LENGTH_SHORT).show()
-                            } else {
-                                copyToClipboard(ctx, ck, "Cookie 已复制到剪贴板")
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = has,
-                    ) {
-                        Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("导出 Cookie")
-                    }
-                    GlassActionButton(
-                        onClick = {
-                            Session.clearCookie()
-                            tick++
-                            DebugStore.log("Debug", "Cookie 已清除")
-                            Toast.makeText(ctx, "已清除注入的 Cookie", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = has,
-                    ) {
-                        Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("清除")
-                    }
-                }
-            }
-        }
-
-        Text("提示：Cookie 等同于完整账号权限。导出后请勿粘贴到公开渠道；" +
-            "日志与请求记录里**不会**出现 Cookie 原文。",
+        Text("提示：登录态等同于完整账号权限。导出后请勿粘贴到公开渠道；" +
+            "日志与请求记录里**不会**出现凭证原文。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }

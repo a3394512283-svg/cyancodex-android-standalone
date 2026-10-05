@@ -90,6 +90,29 @@ object Session {
 
     fun isLoggedIn(): Boolean = !token.isNullOrBlank()
 
+    /**
+     * ★★ **Cookie 登录的哨兵 token** (2026-10-05)。
+     *
+     * 用户原话:「我的调试的 cookie 一直导出不了，我的 cookie 是指登录态之类的，
+     * 反正输进去能进行登陆就行」。
+     *
+     * ## 它解决什么
+     * 全 App 判断"登录了没"看的是 [token] (各页面一句 `if (AppState.token == null) 请先登录`),
+     * 而用 cookie 登录时**压根没有 token** —— 只有 cookie。若 `token` 留空, 界面会一直显示未登录,
+     * 用户注入了 cookie 也进不去任何需要登录的页面 —— 这正是"输进去也没用"的根因。
+     *
+     * ## 做法
+     * 注入 cookie 并**用 cookie 成功拉到用户信息**之后, 把 token 设成这个**哨兵值**,
+     * 让"已登录"这件事在 UI 层成立。
+     *
+     * ⛔ 同时 [com.canglan.cyancodex.data.ApiClient] 的认证头**必须跳过它** ——
+     *    否则会发出 `Authorization: Bearer __cookie_login__`, 服务端 401,
+     *    再触发"401 自动登出"把刚建立的会话清掉(表现为"刚用 cookie 登录就掉线")。
+     *
+     * ⚠️ 它**不是**真凭证: 任何地方都不该拿它当 token 用(拼 URL、发给 logout 接口等)。
+     */
+    const val COOKIE_TOKEN = "__cookie_login__"
+
     /** 是否曾注册过账号 (首次进入 App 引导「注册」而非「登录」) */
     var hasRegistered: Boolean
         get() = sp.getBoolean("has_registered", false)
@@ -149,6 +172,147 @@ object Session {
             .map { it.removePrefix("Cookie:").removePrefix("cookie:").trim() }
             .filter { it.contains('=') }
         return parts.joinToString("; ")
+    }
+
+    // =================================================================================
+    //  ★★ 登录态导入 / 导出 (2026-10-05)
+    // =================================================================================
+
+    /**
+     * 导出文本的**首行标记**。导入时看到它就按"带标签格式"解析。
+     *
+     * ⛔ 改这个字符串会让**旧导出文本无法识别** —— 它是格式版本的一部分, 别随手改。
+     */
+    const val LOGIN_BLOB_HEAD = "=== CyanCodex 登录态 v1 ==="
+
+    /**
+     * 一份**解析出来的**登录态。两个字段都可为 null。
+     *
+     * 与 [token] / [cookie] 的关系: 这是"待落地的输入", 还没写进 SP ——
+     * 先解析、再校验、最后才落地 (见 `AppState.importLoginState`)。
+     */
+    data class LoginState(val token: String? = null, val cookie: String? = null) {
+        val isEmpty: Boolean get() = token.isNullOrBlank() && cookie.isNullOrBlank()
+    }
+
+    /** 当前是否有**可导出**的登录态。哨兵 token 不算(它不是真凭证)。 */
+    fun hasLoginState(): Boolean =
+        !cookie.isNullOrBlank() || realToken() != null
+
+    /**
+     * 当前真实的 token —— **排除哨兵值** [COOKIE_TOKEN]。
+     *
+     * 哨兵只是"让 UI 认为已登录"的占位符, 发出去服务端不认, 导出它毫无意义
+     * (而且会把一个假凭证当成登录态传播出去)。
+     */
+    fun realToken(): String? = token?.takeIf { it.isNotBlank() && it != COOKIE_TOKEN }
+
+    /**
+     * ★★ **导出登录态** —— 把当前可复用的登录凭证格式化成一段可粘贴的文本。
+     *
+     * ## 为什么不是"导出 Cookie"
+     * 2026-10-05 实测确认: **服务器从不下发 `Set-Cookie`**(`api/auth/captcha` 与
+     * `api/auth/login` 的响应头里都没有这个字段), 认证完全靠 `Authorization: Bearer <token>`。
+     * 也就是说 —— **用账号密码登录时, App 里根本不存在 cookie**。
+     * 原来那个「导出 Cookie」在这种状态下只能导出空串, 用户看到的就是"导出不了"
+     * (用户原话: 「我测试了登录状态下获取和重新登陆一次再获取都不行」)。
+     *
+     * 用户对"cookie"的定义其实很朴素: 「**我的 cookie 是指登录态之类的, 反正输进去能进行登陆就行**」。
+     * 所以这里导出的就是**登录态本身** —— token 与 cookie 谁有导谁, 两个都有就都带上。
+     *
+     * @return 带标签的多行文本; **空串 = 当前没有任何可导出的登录态**。
+     */
+    fun exportLoginState(): String {
+        val tk = realToken()
+        val ck = cookie
+        if (tk == null && ck.isNullOrBlank()) return ""
+        val sb = StringBuilder()
+        sb.append(LOGIN_BLOB_HEAD).append('\n')
+        if (tk != null) sb.append("token: ").append(tk).append('\n')
+        if (!ck.isNullOrBlank()) sb.append("cookie: ").append(ck).append('\n')
+        return sb.toString().trimEnd()
+    }
+
+    /**
+     * ★★ **解析用户粘贴进来的登录态** —— [exportLoginState] 的逆运算, 同时兼容手输。
+     *
+     * 三种输入都要吃下 (按优先级):
+     *  ① **带标签格式** (本 App 导出的): 逐行读 `token:` / `cookie:` —— 最可靠, 无歧义;
+     *  ② **裸 token**: 形如 JWT (`xxx.yyy.zzz`) —— 见 [looksLikeToken];
+     *  ③ **裸 cookie**: 形如 `a=1; b=2` —— 走 [sanitizeCookie] 洗一遍。
+     *
+     * ⚠️ 判定顺序不能反: 先试带标签(最明确), 再试 token 形状(最容易被 cookie 规则误吞 ——
+     *   带 `=` 填充的 JWT 会被 [sanitizeCookie] 当成 `k=v` 留下来), 最后才当 cookie。
+     */
+    fun parseLoginState(raw: String): LoginState {
+        val text = raw.trim()
+        if (text.isBlank()) return LoginState()
+
+        // ---- ① 带标签格式 ----
+        var tk: String? = null
+        var ck: String? = null
+        var labeled = false
+        text.lineSequence().forEach { line ->
+            val l = line.trim()
+            when {
+                l.startsWith("token:", ignoreCase = true) -> {
+                    labeled = true
+                    tk = l.substringAfter(':').trim().takeIf { it.isNotBlank() }
+                }
+                l.startsWith("cookie:", ignoreCase = true) -> {
+                    labeled = true
+                    ck = l.substringAfter(':').trim().takeIf { it.isNotBlank() }
+                }
+            }
+        }
+        if (labeled) return LoginState(token = tk, cookie = ck?.let { sanitizeCookie(it) }?.takeIf { it.isNotBlank() })
+
+        // ---- ② 裸 token ----
+        if (looksLikeToken(text)) return LoginState(token = text)
+
+        // ---- ③ 裸 cookie ----
+        val cleaned = sanitizeCookie(text)
+        if (cleaned.isNotBlank()) return LoginState(cookie = cleaned)
+
+        return LoginState()
+    }
+
+    /**
+     * 这段文本像不像一个**令牌**。
+     *
+     * 判据刻意保守(宁可漏判成 cookie, 也不要把 cookie 误当成 token —— 后者会发出
+     * 一个畸形 Authorization 头, 更难排查):
+     *  - 单行(不含换行);
+     *  - 长度 ≥ 20;
+     *  - **恰好 2 个点** —— JWT 的 `header.payload.signature` 结构;
+     *  - 只含 base64url 字符与点。
+     */
+    private fun looksLikeToken(s: String): Boolean {
+        if (s.contains('\n') || s.length < 20) return false
+        if (s.count { it == '.' } != 2) return false
+        return s.all { it.isLetterOrDigit() || it == '.' || it == '-' || it == '_' || it == '=' }
+    }
+
+    /**
+     * 登录态的**人类可读摘要** —— 给调试面板用。**永不返回凭证原文**。
+     */
+    fun loginStateSummary(): String {
+        val tk = realToken()
+        val ck = cookie
+        val cookieSession = token == COOKIE_TOKEN
+        val sb = StringBuilder()
+        sb.append("令牌: ").append(if (tk != null) "已设置（${tk.length} 字符）" else "无")
+        sb.append("　·　")
+        sb.append("Cookie: ").append(if (!ck.isNullOrBlank()) "已设置（${ck.length} 字符）" else "无")
+        sb.append('\n')
+        sb.append(
+            when {
+                cookieSession -> "登录态: ✅ 由 Cookie 维持"
+                tk != null -> "登录态: ✅ 由令牌维持"
+                else -> "登录态: 未登录"
+            }
+        )
+        return sb.toString()
     }
 
     // ---------- API 配置 ----------
