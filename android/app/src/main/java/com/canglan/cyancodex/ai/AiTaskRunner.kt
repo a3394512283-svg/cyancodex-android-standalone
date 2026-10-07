@@ -10,6 +10,7 @@ import androidx.compose.runtime.setValue
 import com.canglan.cyancodex.data.AiMode
 import com.canglan.cyancodex.data.AiToolEvent
 import com.canglan.cyancodex.data.ApiClient
+import com.canglan.cyancodex.data.DebugStore
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.UiMsg
 import com.canglan.cyancodex.ui.components.errText
@@ -481,6 +482,14 @@ object AiTaskRunner {
             try {
                 // ★ 每轮都重新读 Session: 用户在等待期间可能改了模型/轮数, 以"发出去那一刻"为准更符合直觉
                 val useKey = Session.hasAiKey() && !Session.aiUseOfficial
+                // ★ 埋点 (2026-10-07): AI 任务是最常被追问"为什么没反应"的地方,
+                //   开始 / 结束 / 异常三段都要留痕, 才能判断是"没发出去"还是"发出去了但失败"。
+                DebugStore.logI(
+                    "Ai",
+                    "任务开始 · ${if (useKey) "自备Key" else "官方通道"} · " +
+                        "模型=${if (useKey) Session.aiModel else "官方默认"} · " +
+                        "联网=$searchOn · 专家=$cmdExpert · 轮数=${Session.aiToolRounds}",
+                )
                 // ★ 2026-10-05: 工具闸由**模式**决定, 在 send() 入口就算好了 (见那里的注释) ——
                 //   这里是闭包捕获, 等待期间用户改设置不会影响已经发出去的这一轮。
                 if (useKey) {
@@ -634,8 +643,11 @@ object AiTaskRunner {
                     ),
                 )
                 // 取消必须继续传播(safeApi 也是这个约定), 但收尾照做 —— 见 finally
+                DebugStore.logI("Ai", "生成被用户停止, 已保留已生成的 ${partial.length} 字符")
                 throw e
             } catch (e: Exception) {
+                // ★ E 级: 走到这里说明这一轮**彻底失败**, 用户看到的是"回答报错"
+                DebugStore.logE("Ai", "任务异常: ${e.javaClass.simpleName}: ${e.message ?: ""}")
                 AiConvStore.setMessages(convId, history + UiMsg("assistant", errText(e), err = true))
             } finally {
                 hintJob.cancel()
@@ -658,6 +670,7 @@ object AiTaskRunner {
                 tick++
                 // ⚠️ 还有别的会话在跑就**不能停服务** —— 停了那个任务的保活就没了。
                 //   完成通知照补: 用户可能已经切出去了, 就是想知道哪条好了。
+                DebugStore.logI("Ai", "任务收尾 · 成功=$ok · 仍有 ${running.size} 个会话在跑")
                 AiTaskService.finish(ctx, ok, running.isNotEmpty())
             }
         }

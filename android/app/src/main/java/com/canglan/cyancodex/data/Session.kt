@@ -70,7 +70,13 @@ object Session {
     // ---------- 认证 (token 加密落盘, 明文仅内存短暂存在) ----------
     var token: String?
         get() = Crypto.decryptOrNull(sp.getString("token_enc", null))
-        set(v) { sp.edit().putString("token_enc", Crypto.encryptOrNull(v)).apply() }
+        set(v) {
+            sp.edit().putString("token_enc", Crypto.encryptOrNull(v)).apply()
+            // ★ 登录态埋点 (2026-10-07) —— ⛔ **只报长度, 永不打印原文**:
+            //   token 是账号级凭证, 而日志会被用户随手贴到 issue / 群里。
+            if (v.isNullOrBlank()) DebugStore.logW("Auth", "令牌已清除")
+            else DebugStore.logI("Auth", "令牌已更新 (${v.length} 字符)")
+        }
 
     fun saveUser(u: User) {
         sp.edit().putString("user_json", gson.toJson(u)).apply()
@@ -120,6 +126,7 @@ object Session {
 
     fun logout() {
         sp.edit().remove("token_enc").remove("user_json").apply()
+        DebugStore.logI("Auth", "已登出 (清除令牌与用户信息)")
     }
 
     // ---------- 手动注入的 Cookie (隐藏调试验证入口, 2026-10-05) ----------
@@ -150,6 +157,7 @@ object Session {
     /** 只清注入的 cookie, **不动** token / 用户信息 (用户明确要的语义) */
     fun clearCookie() {
         sp.edit().remove("cookie_enc").apply()
+        DebugStore.logI("Auth", "注入的 Cookie 已清除")
     }
 
     /**
@@ -166,6 +174,7 @@ object Session {
      */
     fun clearLoginState() {
         sp.edit().remove("token_enc").remove("cookie_enc").apply()
+        DebugStore.logI("Auth", "登录态已清除 (令牌 + Cookie, 用户资料保留)")
     }
 
     /**

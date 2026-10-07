@@ -7,6 +7,7 @@ import android.os.Handler
 import android.os.Looper
 import com.canglan.cyancodex.data.AnnouncementNotifier
 import com.canglan.cyancodex.data.AppForeground
+import com.canglan.cyancodex.data.DebugStore
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.SpeedTest
 import com.canglan.cyancodex.data.TamperDetector
@@ -16,23 +17,50 @@ class CyanCodexApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        val t0 = System.currentTimeMillis()
+
         Session.init(this)
+        // ★ 调试埋点从**这里**开始 —— 必须晚于 Session.init:
+        //   DebugStore 的 SharedPreferences 是在 Session.init → DebugStore.attach 里注入的,
+        //   在此之前打日志会被 [DebugStore.active] 的 runCatching 兜成 false 而静默丢弃。
+        DebugStore.logI("App", "启动 · $packageName · v${appVersion()}")
+
         registerForegroundTracking()
+        DebugStore.logD("App", "前台跟踪已注册 (AppForeground)")
+
         // 液态玻璃启动保护 (连续闪退 2 次自动关闭), 必须在渲染界面之前执行
         guardLiquidGlass()
+
         // 客户端检测: 启动即计算当前 APK 签名, 后续所有请求携带 X-App-Signature
         TamperDetector.init(this)
+        DebugStore.logD("App", "签名检测初始化 (X-App-Signature)")
         // 插件系统: 复制内置插件 + 加载 (设置→插件 可管理)
         PluginManager.init(this)
+        DebugStore.logD("App", "插件系统初始化")
         // 新公告系统通知: 建渠道 + 立即检查一次 + 注册周期检查
         AnnouncementNotifier.ensureChannel(this)
         AnnouncementNotifier.checkNow(this)
         AnnouncementNotifier.schedule(this)
+        DebugStore.logD("App", "公告通知: 建渠道 + 立即检查 + 周期任务")
         // 后台常驻收消息的服务渠道 (真正的启动在 MainActivity / 开机 / 登录后, 避免后台启动被系统拒绝)
         com.canglan.cyancodex.data.MessageWatchService.ensureChannel(this)
+        DebugStore.logD("App", "消息服务通知渠道已建")
         // 工具箱: 网络测速的历史记录存储
         SpeedTest.init(this)
+
+        DebugStore.logI("App", "启动流程结束 · 耗时 ${System.currentTimeMillis() - t0}ms")
     }
+
+    /**
+     * 版本串 `2.0.0(20000)` —— 只给日志用。
+     *
+     * ⚠️ 不用 `BuildConfig.VERSION_NAME`: 本工程 `buildFeatures.buildConfig` 未开启,
+     *    那个类不存在, 直接引用会编译失败。走 PackageManager 最稳, 且 `runCatching` 兜底。
+     */
+    private fun appVersion(): String = runCatching {
+        val pi = packageManager.getPackageInfo(packageName, 0)
+        "${pi.versionName}(${androidx.core.content.pm.PackageInfoCompat.getLongVersionCode(pi)})"
+    }.getOrDefault("?")
 
     companion object {
         /** 全局 Application 引用 (退出登录时需要停掉后台服务) */
@@ -78,20 +106,27 @@ class CyanCodexApp : Application() {
      * 避免用户被一直闪退卡死进不去 App。
      */
     private fun guardLiquidGlass() {
-        if (!Session.liquidGlass) return
+        if (!Session.liquidGlass) {
+            DebugStore.logD("Glass", "液态玻璃未开启, 跳过启动保护")
+            return
+        }
         var crashes = Session.glassCrashCount
         if (Session.glassBootPending) crashes += 1          // 上次启动没能存活 = 闪退了一次
         if (crashes >= 2) {
             Session.liquidGlass = false                     // 连续闪退 2 次: 自动关闭
             Session.glassCrashCount = 0
             Session.glassBootPending = false
+            // ★ W 级: 这是"用户看到外观突然变了"的原因, 必须显眼
+            DebugStore.logW("Glass", "连续闪退 $crashes 次 → 已自动关闭液态玻璃 (防止用户被闪退卡死)")
         } else {
             Session.glassCrashCount = crashes
             Session.glassBootPending = true
+            DebugStore.logD("Glass", "启动保护: 累计闪退计数 $crashes, 待确认")
             // 存活 5 秒视为启动成功 -> 清零
             Handler(Looper.getMainLooper()).postDelayed({
                 Session.glassBootPending = false
                 Session.glassCrashCount = 0
+                DebugStore.logD("Glass", "已存活 5 秒, 闪退计数清零")
             }, 5000L)
         }
     }

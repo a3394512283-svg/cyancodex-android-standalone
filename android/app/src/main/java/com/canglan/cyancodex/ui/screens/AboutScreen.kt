@@ -117,7 +117,7 @@ fun AboutScreen(nav: NavHostController) {
         if (DebugStore.unlocked && !DebugStore.masterOn) {
             DebugStore.masterOn = true
             DebugStore.logEnabled = true
-            DebugStore.log("Debug", "调试模式已重新开启 (关于页点版本号)")
+            DebugStore.logI("Debug", "调试模式已重新开启 (关于页点版本号)")
             Toast.makeText(ctx, "调试模式已重新开启", Toast.LENGTH_SHORT).show()
             nav.navigate(Routes.DEBUG)
             return
@@ -133,7 +133,7 @@ fun AboutScreen(nav: NavHostController) {
             //   因为入口判的是 activeState(解锁 且 总开关开着)。
             DebugStore.masterOn = true
             DebugStore.logEnabled = true
-            DebugStore.log("Debug", "调试模式已解锁 (连点版本号 7 次)")
+            DebugStore.logI("Debug", "调试模式已解锁 (连点版本号 7 次)")
             tapCount = 0
             tapHint = "调试模式已解锁"
             Toast.makeText(ctx, "调试模式已解锁，已跳转调试面板", Toast.LENGTH_LONG).show()

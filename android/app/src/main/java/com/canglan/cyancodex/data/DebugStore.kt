@@ -4,8 +4,7 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.util.Calendar
 import java.util.Locale
 
 /**
@@ -198,25 +197,70 @@ object DebugStore {
 
     // ---------- 日志 ----------
 
-    private const val LOG_CAP = 500
+    private const val LOG_CAP = 800
     private const val REQ_CAP = 200
 
-    private val _logs = mutableStateListOf<String>()
+    /**
+     * **日志级别**（仿 Android `Log`）—— 2026-10-07 新增。
+     *
+     * 用户反馈「调试日志太少」。诊断发现两个原因：
+     * ① 全工程只有 6 处业务埋点（这才是主因，见各调用点）；
+     * ② **日志没有分级** —— 初始化、网络、异常全糊成一片，看不出轻重，也没法过滤。
+     *
+     * 有了级别，面板上就能按级别筛，导出时也能一眼挑出 WARN / ERROR。
+     */
+    enum class LogLevel(val code: Char, val label: String) {
+        VERBOSE('V', "详细"),
+        DEBUG('D', "调试"),
+        INFO('I', "信息"),
+        WARN('W', "警告"),
+        ERROR('E', "错误"),
+    }
+
+    /**
+     * 一条结构化日志。
+     *
+     * ⚠️ 时间戳存 `Long`，**格式化推迟到显示/导出时**（见 [timeText]）。
+     *    旧版在 `log()` 里直接调共享的 `SimpleDateFormat` —— 而 `log()` 会被
+     *    OkHttp 的工作线程调用（拦截器里），`SimpleDateFormat` 不是线程安全的，
+     *    并发下会产出错乱的时间串甚至抛异常。现在改为调用线程只取毫秒值，
+     *    格式化发生在 UI 线程。
+     */
+    data class LogRecord(
+        val time: Long,
+        val level: LogLevel,
+        val tag: String,
+        val msg: String,
+    ) {
+        /** `HH:mm:ss.SSS` —— 手写格式化，不用共享的 `SimpleDateFormat`（线程安全考虑见类注释）。 */
+        fun timeText(): String {
+            val c = Calendar.getInstance()
+            c.timeInMillis = time
+            return String.format(
+                Locale.US, "%02d:%02d:%02d.%03d",
+                c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE),
+                c.get(Calendar.SECOND), c.get(Calendar.MILLISECOND),
+            )
+        }
+
+        /** 导出/复制用的一行 —— 与旧版 `HH:mm:ss.SSS  [tag]  msg` 兼容，只多插一个级别字母。 */
+        fun toLine(): String = "${timeText()}  ${level.code}  [$tag]  $msg"
+    }
+
+    private val _logs = mutableStateListOf<LogRecord>()
     private val _requests = mutableStateListOf<ReqRecord>()
 
-    /** 日志行（Compose 可观察）。 */
-    val logs: SnapshotStateList<String> get() = _logs
+    /** 日志（Compose 可观察；**新的追加在尾部**，UI 显示时自行 `reversed()`）。 */
+    val logs: SnapshotStateList<LogRecord> get() = _logs
 
-    /** 网络请求记录（Compose 可观察）。 */
+    /** 网络请求记录（Compose 可观察；**新的在最前**，见 [pushReq]）。 */
     val requests: SnapshotStateList<ReqRecord> get() = _requests
 
     /** 请求计数（用于触发重组）。 */
     val reqTick = mutableStateOf(0)
 
-    private val timeFmt = SimpleDateFormat("HH:mm:ss.SSS", Locale.getDefault())
-
     /**
-     * 记一条日志。
+     * 记一条日志（默认 [LogLevel.DEBUG]）。
      *
      * ⛔ **只在主线程改 `_logs`** —— 它被 Compose 直接观察，
      * 从 IO 线程写会踩快照冲突（跟 AiTaskRunner 里 onEvent/onDelta 必须切主线程同理）。
@@ -225,11 +269,21 @@ object DebugStore {
      * ★ 2026-10-05: 判据从 [unlocked] 改成 [active] —— 用户在面板里把总开关关掉后,
      *   日志应当**立刻停写**, 而不是等解锁状态变化(它不会变)。
      */
-    fun log(tag: String, msg: String) {
+    fun log(tag: String, msg: String) = log(LogLevel.DEBUG, tag, msg)
+
+    /** 记一条指定级别的日志。 */
+    fun log(level: LogLevel, tag: String, msg: String) {
         if (!active || !logEnabled) return
-        val line = "${timeFmt.format(Date())}  [$tag]  $msg"
-        enqueue { pushLog(line) }
+        val rec = LogRecord(System.currentTimeMillis(), level, tag, msg)
+        enqueue { pushLog(rec) }
     }
+
+    // ---- 级别便捷方法：调用点写 `DebugStore.logW("Net", "…")` 比写全枚举短得多 ----
+    fun logV(tag: String, msg: String) = log(LogLevel.VERBOSE, tag, msg)
+    fun logD(tag: String, msg: String) = log(LogLevel.DEBUG, tag, msg)
+    fun logI(tag: String, msg: String) = log(LogLevel.INFO, tag, msg)
+    fun logW(tag: String, msg: String) = log(LogLevel.WARN, tag, msg)
+    fun logE(tag: String, msg: String) = log(LogLevel.ERROR, tag, msg)
 
     /** 记一条网络请求记录。同样判 [active] —— 总开关关掉后不再堆内存。 */
     fun record(req: ReqRecord) {
@@ -248,8 +302,8 @@ object DebugStore {
         }
     }
 
-    private fun pushLog(line: String) {
-        _logs.add(line)
+    private fun pushLog(rec: LogRecord) {
+        _logs.add(rec)
         while (_logs.size > LOG_CAP) _logs.removeAt(0)
     }
 
@@ -259,8 +313,42 @@ object DebugStore {
         reqTick.value++
     }
 
-    fun clearLogs() = enqueue { _logs.clear() }
+    /** 当前日志里出现过的 tag（去重后按字母序）—— 供面板做 tag 筛选。 */
+    fun logTags(): List<String> = _logs.map { it.tag }.distinct().sorted()
+
+    /** 各级别条数 —— 供面板在筛选 chip 上显示计数。 */
+    fun levelCounts(): Map<LogLevel, Int> {
+        val m = LinkedHashMap<LogLevel, Int>()
+        LogLevel.entries.forEach { m[it] = 0 }
+        _logs.forEach { m[it.level] = (m[it.level] ?: 0) + 1 }
+        return m
+    }
+
+    /**
+     * 清空日志。传 [tag] 只清该 tag 的（2026-10-07 新增）。
+     *
+     * ★ 用**倒序索引**删而不是 `removeAll { }` —— `SnapshotStateList` 的迭代器删除
+     *   在某些组合场景下会抛并发修改，倒序 `removeAt` 是最稳的写法。
+     */
+    fun clearLogs(tag: String? = null) = enqueue {
+        if (tag == null) {
+            _logs.clear()
+        } else {
+            for (i in _logs.indices.reversed()) if (_logs[i].tag == tag) _logs.removeAt(i)
+        }
+    }
+
     fun clearRequests() = enqueue { _requests.clear() }
+
+    /** 删掉单条请求记录（按 [ReqRecord.time] + [ReqRecord.url] 定位）。 */
+    fun removeRequest(time: Long, url: String) = enqueue {
+        val i = _requests.indexOfFirst { it.time == time && it.url == url }
+        if (i >= 0) _requests.removeAt(i)
+    }
+
+    /** 把日志导出成一段纯文本（供「复制筛选结果」用）。 */
+    fun exportLogs(records: List<LogRecord>): String =
+        records.joinToString("\n") { it.toLine() }
 
     /** 把日志与请求记录导出成一段可复制的文本。 */
     fun exportText(): String {
@@ -276,8 +364,11 @@ object DebugStore {
         sb.append("Cookie 注入: ").append(cookieStatusText()).append('\n')
         sb.append("登录态: ").append(runCatching { Session.loginStateSummary().replace('\n', ' ') }.getOrDefault("读取失败")).append('\n')
         sb.append('\n')
+        // ★ 2026-10-07: 加一行级别分布 —— 贴日志求助时对方一眼能看出有没有 ERROR
         sb.append("--- 日志 (").append(_logs.size).append(") ---\n")
-        _logs.forEach { sb.append(it).append('\n') }
+        val lv = levelCounts()
+        sb.append("级别: ").append(lv.entries.joinToString("  ") { "${it.key.label}${it.value}" }).append('\n')
+        _logs.forEach { sb.append(it.toLine()).append('\n') }
         sb.append('\n')
         sb.append("--- 网络请求 (").append(_requests.size).append(") ---\n")
         _requests.forEach { sb.append(it.toLine()).append('\n') }
@@ -324,10 +415,24 @@ object DebugStore {
         val costMs: Long,
         val error: String = "",
     ) {
+        /** 是否算失败 —— 连接没成功（[code] == 0）或 4xx / 5xx。面板「仅看失败」用它。 */
+        val failed: Boolean get() = code == 0 || code >= 400
+
+        /** `MM-dd HH:mm:ss.SSS` —— 手写格式化，理由同 [LogRecord.timeText]。 */
+        fun timeText(): String {
+            val c = Calendar.getInstance()
+            c.timeInMillis = time
+            return String.format(
+                Locale.US, "%02d-%02d %02d:%02d:%02d.%03d",
+                c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH),
+                c.get(Calendar.HOUR_OF_DAY), c.get(Calendar.MINUTE),
+                c.get(Calendar.SECOND), c.get(Calendar.MILLISECOND),
+            )
+        }
+
         fun toLine(): String {
-            val t = SimpleDateFormat("MM-dd HH:mm:ss.SSS", Locale.getDefault()).format(Date(time))
             val status = if (code > 0) code.toString() else "ERR"
-            return "$t  $method  $status  ${costMs}ms  $url" +
+            return "${timeText()}  $method  $status  ${costMs}ms  $url" +
                 if (error.isNotBlank()) "  ← $error" else ""
         }
     }

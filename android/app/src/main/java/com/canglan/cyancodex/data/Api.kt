@@ -406,7 +406,7 @@ object ApiClient {
 
     /** 当用户修改了 API 地址后调用, 重建客户端 */
     fun reset() {
-        DebugStore.log("Api", "重建客户端, baseUrl=${Session.baseUrl}")
+        DebugStore.logI("Api", "重建客户端 (下次请求生效), baseUrl=${Session.baseUrl}")
         synchronized(this) { service = null }
     }
 
@@ -431,7 +431,7 @@ object ApiClient {
 
     private fun build(): ApiService {
         val base = Session.baseUrl
-        DebugStore.log("Api", "初始化 Retrofit, baseUrl=$base" + if (Session.usingCustomBaseUrl) " (调试自定义)" else " (内置默认)")
+        DebugStore.logI("Api", "初始化 Retrofit, baseUrl=$base" + if (Session.usingCustomBaseUrl) " (调试自定义)" else " (内置默认)")
         val authInterceptor = Interceptor { chain ->
             val req = chain.request()
             val b = req.newBuilder()
@@ -498,7 +498,17 @@ object ApiClient {
                         try {
                             val obj = org.json.JSONObject(raw)
                             if (!obj.optBoolean("ok", true)) {
-                                val body = if (resp.code == 401 && req.header("Authorization") != null) {
+                                // ★ 2026-10-07: 401 改写这条路径以前是"隐形"的 ——
+                                //   请求页只看到 401, 日志里却什么都没有, 排查时不知道
+                                //   是谁把它变成了"登录已过期"。加一条 W 级说明。
+                                val expired = resp.code == 401 && req.header("Authorization") != null
+                                if (expired) {
+                                    DebugStore.logW(
+                                        "Api",
+                                        "401 登录已过期 → 已改写成业务错误 (${req.url.encodedPath})",
+                                    )
+                                }
+                                val body = if (expired) {
                                     org.json.JSONObject().put("ok", false)
                                         .put("error", "登录已过期，请重新登录").toString()
                                 } else raw
@@ -530,34 +540,46 @@ object ApiClient {
                 val u = req.url.newBuilder().encodedPath(newPath).build()
                 // ★ 动的是"最终 URL", 所以 authInterceptor 之后加的 header 不受影响;
                 //   但 X-App-Signature 之类是按 baseUrl 算的, 改路径不影响签名
-                DebugStore.log("Debug", "路径改写 ${req.url.encodedPath} -> $newPath")
+                // ★ W 级: 路径改写是用户主动配的"魔法", 排查"请求打到哪去了"必须先看到它
+                DebugStore.logW("Net", "路径改写 ${req.url.encodedPath} -> $newPath")
                 req = req.newBuilder().url(u).build()
             }
 
+            val path = req.url.encodedPath
             val t0 = System.currentTimeMillis()
             try {
                 val resp = chain.proceed(req)
+                val cost = System.currentTimeMillis() - t0
                 DebugStore.record(
                     DebugStore.ReqRecord(
                         time = t0,
                         method = req.method,
                         url = req.url.toString(),
                         code = resp.code,
-                        costMs = System.currentTimeMillis() - t0,
+                        costMs = cost,
                     )
                 )
+                // ★ 2026-10-07 新增: 每条请求再往**日志**里写一行(V 级)。
+                //   请求页是"按条罗列的表", 日志页是"时间线" —— 排查时按时间线串起来更快
+                //   (能看到"启动 → 拉公告 → 拉用户 → 失败"的先后关系)。
+                //   V 级是故意的: 请求量大时可用级别筛选一键隐藏, 不挤占其他日志。
+                DebugStore.logV("Net", "${req.method} $path → ${resp.code} · ${cost}ms")
                 resp
             } catch (e: Exception) {
+                val cost = System.currentTimeMillis() - t0
+                val err = e.javaClass.simpleName + ": " + (e.message ?: "")
                 DebugStore.record(
                     DebugStore.ReqRecord(
                         time = t0,
                         method = req.method,
                         url = req.url.toString(),
                         code = 0,
-                        costMs = System.currentTimeMillis() - t0,
-                        error = e.javaClass.simpleName + ": " + (e.message ?: ""),
+                        costMs = cost,
+                        error = err,
                     )
                 )
+                // ★ E 级: 连接失败 / 超时是最常被追问的故障, 必须在日志里显眼
+                DebugStore.logE("Net", "${req.method} $path 失败 · ${cost}ms · $err")
                 throw e
             }
         }

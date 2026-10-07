@@ -8,6 +8,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -18,11 +19,15 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -35,6 +40,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
@@ -44,7 +50,10 @@ import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.ui.AppState
 import com.canglan.cyancodex.ui.components.AppTopBar
 import com.canglan.cyancodex.ui.components.GlassActionButton
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.util.concurrent.TimeUnit
 import com.canglan.cyancodex.ui.components.GlassSwitch
 
 /**
@@ -52,10 +61,15 @@ import com.canglan.cyancodex.ui.components.GlassSwitch
  *
  * 入口：关于页连点版本号 7 次解锁 → 设置页最底部「调试」。
  *
- * 三块：
- * 1. 服务器地址（含端口）—— 指向本地 / 局域网 / 自建后端
- * 2. 日志 —— 开关 + 查看 / 复制 / 清空
- * 3. 网络请求 —— 每条请求的 method / 状态码 / 耗时 / URL / 错误
+ * 四块：
+ * 1. 服务器地址（含端口）—— 指向本地 / 局域网 / 自建后端，附**连通性测试**；
+ * 2. 日志 —— 分级（V/D/I/W/E）+ 搜索 + 按 tag / 级别筛选 + 单条复制；
+ * 3. 网络请求 —— method / 状态码 / 耗时 / URL / 错误，可展开详情、单条复制与删除；
+ * 4. 登录态 —— 导入 / 导出 / 清除。
+ *
+ * ★ 2026-10-07 增强：用户反馈「调试日志太少，功能太少」。日志少的主因是**埋点少**
+ *   （全工程只有 6 处业务埋点），已在 App 启动 / 生命周期 / 网络 / 登录态 / AI 任务
+ *   各处补齐（共 30+ 处）；本文件负责把这些日志**看得清**（分级 + 筛选 + 检索）。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,7 +161,7 @@ private fun MasterSwitchCard(ctx: Context, on: Boolean, onChange: (Boolean) -> U
                     // ⚠️ 地址 / 路径改写 / Cookie 注入都发生在**构建客户端**的时候,
                     //   开关一变必须重建, 否则要等下次冷启动才生效。
                     ApiClient.reset()
-                    DebugStore.log("Debug", "调试模式 -> " + if (it) "开" else "关")
+                    DebugStore.logI("Debug", "调试模式 -> " + if (it) "开" else "关")
                     Toast.makeText(
                         ctx,
                         if (it) "调试能力已启用"
@@ -274,7 +288,8 @@ private fun LoginStateTab(ctx: Context) {
                             ApiClient.reset()
                             tick++
                             result = ""
-                            DebugStore.log("Debug", "登录态已清除")
+                            // 不再在这里补日志: Session.clearLoginState() 内部已打一条
+                            // INFO 级「登录态已清除」（2026-10-07 下沉），重复打会刷屏。
                             Toast.makeText(ctx, "已清除登录态（令牌 + Cookie）", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
@@ -365,7 +380,7 @@ private fun LoginStateTab(ctx: Context) {
                             Session.clearLoginState()
                             ApiClient.reset()
                             tick++
-                            DebugStore.log("Debug", "登录态已清除")
+                            // 同上: 日志由 Session.clearLoginState() 内部统一打
                             Toast.makeText(ctx, "已清除登录态（令牌 + Cookie）", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
@@ -395,6 +410,10 @@ private fun ServerTab(ctx: Context) {
     // ★ 用 key 触发重算: 保存后 savedUrl 变化 -> effective 重新读取
     var savedUrl by remember { mutableStateOf(DebugStore.customBaseUrl) }
     val effective = remember(savedUrl) { DebugStore.currentBaseUrlDisplay() }
+    // 连通性测试（2026-10-07 新增）
+    val scope = rememberCoroutineScope()
+    var testing by remember { mutableStateOf(false) }
+    var testResult by remember { mutableStateOf("") }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -410,6 +429,39 @@ private fun ServerTab(ctx: Context) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+
+                // ★ 连通性测试 —— 打官方那个**无需鉴权**的 api/update/latest。
+                //   配了自定义地址后第一件想知道的事就是"这个地址通不通"，原来只能靠
+                //   "改完重启、看看有没有报错"间接猜。
+                GlassActionButton(
+                    onClick = {
+                        scope.launch {
+                            testing = true
+                            testResult = ""
+                            testResult = probeServer()
+                            testing = false
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !testing,
+                ) {
+                    if (testing) {
+                        CircularProgressIndicator(Modifier.size(15.dp), strokeWidth = 2.dp)
+                    } else {
+                        Icon(Icons.Default.PlayArrow, null, Modifier.size(16.dp))
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (testing) "测试中…" else "测试连通性（GET /api/update/latest）")
+                }
+                if (testResult.isNotBlank()) {
+                    Text(
+                        testResult,
+                        style = MaterialTheme.typography.labelSmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (testResult.startsWith("✅")) MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.error,
+                    )
+                }
             }
         }
 
@@ -456,7 +508,7 @@ private fun ServerTab(ctx: Context) {
                             DebugStore.customBaseUrl = v
                             savedUrl = v
                             ApiClient.reset()
-                            DebugStore.log("Debug", "自定义地址 -> " + v.ifBlank { "(清空, 用默认)" })
+                            DebugStore.logI("Debug", "自定义地址 -> " + v.ifBlank { "(清空, 用默认)" })
                             Toast.makeText(ctx, "已保存，重启 App 生效", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
@@ -472,7 +524,7 @@ private fun ServerTab(ctx: Context) {
                             savedUrl = ""
                             DebugStore.customBaseUrl = ""
                             ApiClient.reset()
-                            DebugStore.log("Debug", "自定义地址已清除, 回到内置默认")
+                            DebugStore.logI("Debug", "自定义地址已清除, 回到内置默认")
                             Toast.makeText(ctx, "已恢复默认地址", Toast.LENGTH_SHORT).show()
                         },
                         modifier = Modifier.weight(1f),
@@ -488,9 +540,44 @@ private fun ServerTab(ctx: Context) {
         PathRuleCard(ctx)
 
         Text("提示：改完地址务必重启 App —— Retrofit 客户端在首次请求时构建并缓存，\n" +
-            "仅清缓存不足以让所有已注入的依赖换到新地址。",
+            "仅清缓存不足以让所有已注入的依赖换到新地址。\n" +
+            "「测试连通性」打的是官方**无需鉴权**的 /api/update/latest，只验证「地址通不通」；\n" +
+            "登录态是否有效是另一回事（见「登录态」页）。",
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/**
+ * 探一次服务器连通性（2026-10-07 新增）。
+ *
+ * 打的是官方 **无需鉴权** 的 `GET /api/update/latest` —— 所以它只回答"这个地址通不通"，
+ * 不涉及登录态。用独立的短超时 OkHttpClient（8 秒），一次性用完即弃。
+ *
+ * ⛔ 必须在 IO 线程（`withContext(Dispatchers.IO)`）：网络调用 + 最长 8 秒，
+ *    放主线程会直接 ANR。
+ * ★ 返回体只取前 140 字符预览，且该接口返回的是版本元数据（version / notes 等），
+ *   不含任何凭证。
+ */
+private suspend fun probeServer(): String = withContext(Dispatchers.IO) {
+    val base = DebugStore.currentBaseUrlDisplay().trimEnd('/')
+    val url = "$base/api/update/latest"
+    val t0 = System.currentTimeMillis()
+    runCatching {
+        val client = okhttp3.OkHttpClient.Builder()
+            .connectTimeout(8, TimeUnit.SECONDS)
+            .readTimeout(8, TimeUnit.SECONDS)
+            .build()
+        client.newCall(okhttp3.Request.Builder().url(url).get().build()).execute().use { resp ->
+            val cost = System.currentTimeMillis() - t0
+            val body = resp.body?.string().orEmpty()
+            val head = "HTTP ${resp.code} · ${cost}ms · ${body.length} 字节"
+            val preview = body.take(140).replace('\n', ' ')
+            if (resp.isSuccessful) "✅ $head\n$preview" else "⚠️ $head\n$preview"
+        }
+    }.getOrElse { e ->
+        "❌ 连接失败（${System.currentTimeMillis() - t0}ms）\n" +
+            "${e.javaClass.simpleName}: ${e.message ?: ""}"
     }
 }
 
@@ -513,7 +600,7 @@ private fun PathRuleCard(ctx: Context) {
         rules = newRules
         DebugStore.pathRules = newRules
         ApiClient.reset()
-        DebugStore.log("Debug", "路径规则更新: ${newRules.size} 条")
+        DebugStore.logI("Debug", "路径规则更新: ${newRules.size} 条")
         Toast.makeText(ctx, "已保存，重启 App 生效", Toast.LENGTH_SHORT).show()
     }
 
@@ -604,11 +691,46 @@ private fun PathRuleCard(ctx: Context) {
 
 // ======================= 日志 =======================
 
+/**
+ * 日志级别配色 —— 面板上唯一的"轻重"视觉线索。
+ *
+ * ⚠️ 必须带 `@Composable`：V/D 用主题色（`onSurfaceVariant`），这样浅色主题下是深灰、
+ *   深色主题下是浅灰，两端都可读。WARN / ERROR 用固定橙红（语义色，不随主题变）。
+ */
+@Composable
+private fun levelColor(level: DebugStore.LogLevel): Color = when (level) {
+    DebugStore.LogLevel.VERBOSE,
+    DebugStore.LogLevel.DEBUG -> MaterialTheme.colorScheme.onSurfaceVariant
+    DebugStore.LogLevel.INFO -> MaterialTheme.colorScheme.primary
+    DebugStore.LogLevel.WARN -> Color(0xFFF59E0B)
+    DebugStore.LogLevel.ERROR -> Color(0xFFF87171)
+}
+
+/**
+ * **日志标签页**（2026-10-07 重写）。
+ *
+ * 旧版只有「开关 + 复制全部 + 清空 + 只读列表」—— 500 条日志糊成一坨，找一条要肉眼扫。
+ * 现在补上：关键字搜索、级别筛选（带计数）、tag 筛选、单条点击复制、复制筛选结果、
+ * 按 tag 单独清空。
+ */
 @Composable
 private fun LogTab(ctx: Context) {
     var enabled by remember { mutableStateOf(DebugStore.logEnabled) }
+    var query by remember { mutableStateOf("") }
+    var levelFilter by remember { mutableStateOf<DebugStore.LogLevel?>(null) }
+    var tagFilter by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val all = DebugStore.logs
+    val tags = all.map { it.tag }.distinct().sorted()
+    val counts = all.groupingBy { it.level }.eachCount()
+
+    val filtered = all.filter { r ->
+        (levelFilter == null || r.level == levelFilter) &&
+            (tagFilter == null || r.tag == tagFilter) &&
+            (query.isBlank() || r.msg.contains(query, true) || r.tag.contains(query, true))
+    }
+
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("记录日志", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
@@ -618,100 +740,306 @@ private fun LogTab(ctx: Context) {
             })
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            GlassActionButton(
-                onClick = {
-                    copyToClipboard(ctx, DebugStore.exportText(), "已复制全部日志")
-                },
-                modifier = Modifier.weight(1f),
-            ) {
-                Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("复制全部")
+        // ---- 关键字搜索 ----
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("搜索内容或 tag…", style = MaterialTheme.typography.labelSmall) },
+            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(16.dp)) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, "清空搜索", Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodySmall,
+        )
+
+        // ---- 级别筛选（chip 上带计数，一眼看出有没有 ERROR）----
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            item {
+                FilterChip(
+                    selected = levelFilter == null,
+                    onClick = { levelFilter = null },
+                    label = { Text("全部 ${all.size}", fontSize = 11.sp) },
+                )
             }
-            GlassActionButton(
-                onClick = {
-                    DebugStore.clearLogs()
-                    Toast.makeText(ctx, "日志已清空", Toast.LENGTH_SHORT).show()
-                },
-                modifier = Modifier.weight(1f),
-            ) {
-                Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("清空")
+            items(DebugStore.LogLevel.entries.toList()) { lv ->
+                FilterChip(
+                    selected = levelFilter == lv,
+                    onClick = { levelFilter = if (levelFilter == lv) null else lv },
+                    label = { Text("${lv.label} ${counts[lv] ?: 0}", fontSize = 11.sp) },
+                )
             }
         }
 
-        val logs = DebugStore.logs
-        if (logs.isEmpty()) {
+        // ---- tag 筛选（日志量大时按模块切开）----
+        if (tags.isNotEmpty()) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                item {
+                    FilterChip(
+                        selected = tagFilter == null,
+                        onClick = { tagFilter = null },
+                        label = { Text("全部标签", fontSize = 11.sp) },
+                    )
+                }
+                items(tags) { t ->
+                    FilterChip(
+                        selected = tagFilter == t,
+                        onClick = { tagFilter = if (tagFilter == t) null else t },
+                        label = { Text(t, fontSize = 11.sp) },
+                    )
+                }
+            }
+        }
+
+        // ---- 操作 ----
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            GlassActionButton(
+                onClick = { copyToClipboard(ctx, DebugStore.exportText(), "已复制全部日志与请求记录") },
+                modifier = Modifier.weight(1f),
+            ) {
+                Icon(Icons.Default.ContentCopy, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("复制全部", fontSize = 11.sp)
+            }
+            GlassActionButton(
+                onClick = {
+                    copyToClipboard(
+                        ctx,
+                        DebugStore.exportLogs(filtered),
+                        "已复制筛选结果 ${filtered.size} 条",
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                enabled = filtered.isNotEmpty(),
+            ) {
+                Icon(Icons.Default.FilterList, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("复制筛选", fontSize = 11.sp)
+            }
+            GlassActionButton(
+                onClick = {
+                    val t = tagFilter
+                    DebugStore.clearLogs(t)
+                    Toast.makeText(
+                        ctx,
+                        if (t != null) "已清空 tag=$t 的日志" else "日志已清空",
+                        Toast.LENGTH_SHORT,
+                    ).show()
+                },
+                modifier = Modifier.weight(1f),
+                enabled = all.isNotEmpty(),
+            ) {
+                Icon(Icons.Default.Delete, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text(if (tagFilter != null) "清该标签" else "清空", fontSize = 11.sp)
+            }
+        }
+
+        Text(
+            "显示 ${filtered.size} / ${all.size} 条 · 点单条可复制",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (filtered.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无日志", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (all.isEmpty()) "暂无日志" else "没有符合筛选条件的日志",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
-            // 最新的排最前（logs.reversed()），方便一眼看到最近发生了什么
+            // 最新的排最前（logs 是尾部追加，这里 reversed）
             LazyColumn(
                 Modifier.fillMaxSize().clip(RoundedCornerShape(10.dp))
                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
                 verticalArrangement = Arrangement.spacedBy(1.dp),
             ) {
-                items(logs.reversed()) { line ->
-                    Text(line, style = MaterialTheme.typography.labelSmall,
-                        fontFamily = FontFamily.Monospace,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp))
+                items(filtered.reversed()) { r ->
+                    LogRow(r) { copyToClipboard(ctx, r.toLine(), "已复制该条日志") }
                 }
             }
         }
     }
 }
 
+/** 单条日志：第一行 `时间 级别 tag`，第二行正文。整行可点（复制）。 */
+@Composable
+private fun LogRow(r: DebugStore.LogRecord, onClick: () -> Unit) {
+    val c = levelColor(r.level)
+    Column(
+        Modifier.fillMaxWidth().clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(1.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                r.timeText(), style = MaterialTheme.typography.labelSmall, fontSize = 10.sp,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                r.level.code.toString(), style = MaterialTheme.typography.labelSmall,
+                fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = c,
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(r.tag, style = MaterialTheme.typography.labelSmall, fontSize = 10.sp, color = c)
+        }
+        Text(
+            r.msg, style = MaterialTheme.typography.labelSmall, fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
 // ======================= 请求记录 =======================
 
+/**
+ * **网络请求标签页**（2026-10-07 重写）。
+ *
+ * 旧版只有「复制全部 / 清空 / 只读列表」。新版补上：URL 搜索、仅看失败、失败数 + 平均耗时
+ * 统计、点卡片展开详情、单条复制与单条删除。
+ */
 @Composable
 private fun RequestTab(ctx: Context) {
-    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var query by remember { mutableStateOf("") }
+    var onlyFailed by remember { mutableStateOf(false) }
+    // 展开的那条用 (time, url) 定位 —— 列表会随新请求变动，用下标会串位
+    var expanded by remember { mutableStateOf<Pair<Long, String>?>(null) }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    val all = DebugStore.requests
+    val failCount = all.count { it.failed }
+    val avgMs = if (all.isEmpty()) 0L else all.sumOf { it.costMs } / all.size
+
+    val filtered = all.filter { r ->
+        (!onlyFailed || r.failed) &&
+            (
+                query.isBlank() ||
+                    r.url.contains(query, true) ||
+                    r.method.contains(query, true) ||
+                    r.error.contains(query, true) ||
+                    (r.code > 0 && r.code.toString() == query.trim())
+                )
+    }
+
+    Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            placeholder = { Text("搜索 URL / 方法 / 状态码 / 错误…", style = MaterialTheme.typography.labelSmall) },
+            leadingIcon = { Icon(Icons.Default.Search, null, Modifier.size(16.dp)) },
+            trailingIcon = {
+                if (query.isNotBlank()) {
+                    IconButton(onClick = { query = "" }, modifier = Modifier.size(28.dp)) {
+                        Icon(Icons.Default.Close, "清空搜索", Modifier.size(16.dp))
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = MaterialTheme.typography.bodySmall,
+        )
+
+        Row(verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            FilterChip(
+                selected = !onlyFailed,
+                onClick = { onlyFailed = false },
+                label = { Text("全部 ${all.size}", fontSize = 11.sp) },
+            )
+            FilterChip(
+                selected = onlyFailed,
+                onClick = { onlyFailed = true },
+                label = { Text("仅失败 $failCount", fontSize = 11.sp) },
+            )
+            Spacer(Modifier.weight(1f))
+            Text(
+                "平均 ${avgMs}ms",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             GlassActionButton(
                 onClick = { copyToClipboard(ctx, DebugStore.exportText(), "已复制全部记录") },
                 modifier = Modifier.weight(1f),
             ) {
-                Icon(Icons.Default.ContentCopy, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("复制全部")
+                Icon(Icons.Default.ContentCopy, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("复制全部", fontSize = 11.sp)
+            }
+            GlassActionButton(
+                onClick = {
+                    copyToClipboard(
+                        ctx,
+                        filtered.joinToString("\n") { it.toLine() },
+                        "已复制筛选结果 ${filtered.size} 条",
+                    )
+                },
+                modifier = Modifier.weight(1f),
+                enabled = filtered.isNotEmpty(),
+            ) {
+                Icon(Icons.Default.FilterList, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("复制筛选", fontSize = 11.sp)
             }
             GlassActionButton(
                 onClick = {
                     DebugStore.clearRequests()
+                    expanded = null
                     Toast.makeText(ctx, "请求记录已清空", Toast.LENGTH_SHORT).show()
                 },
                 modifier = Modifier.weight(1f),
+                enabled = all.isNotEmpty(),
             ) {
-                Icon(Icons.Default.Delete, null, Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("清空")
+                Icon(Icons.Default.Delete, null, Modifier.size(15.dp))
+                Spacer(Modifier.width(4.dp))
+                Text("清空", fontSize = 11.sp)
             }
         }
 
-        val reqs = DebugStore.requests
-        if (reqs.isEmpty()) {
+        Text(
+            "显示 ${filtered.size} / ${all.size} 条 · 点单条展开详情",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        if (filtered.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("暂无请求记录", style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    if (all.isEmpty()) "暂无请求记录" else "没有符合筛选条件的请求",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         } else {
             LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(reqs) { r ->
-                    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)) {
+                items(filtered) { r ->
+                    val key = r.time to r.url
+                    val open = expanded == key
+                    // 状态码配色：2xx 主色，4xx 橙，5xx/ERR 红
+                    val codeColor = when {
+                        r.code == 0 -> Color(0xFFF87171)
+                        r.code in 200..299 -> MaterialTheme.colorScheme.primary
+                        r.code in 400..499 -> Color(0xFFF59E0B)
+                        else -> Color(0xFFF87171)
+                    }
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        modifier = Modifier.fillMaxWidth()
+                            .clickable { expanded = if (open) null else key },
+                    ) {
                         Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                // 状态码配色：2xx 主色，4xx 橙，5xx/ERR 红
-                                val codeColor = when {
-                                    r.code == 0 -> Color(0xFFF87171)
-                                    r.code in 200..299 -> MaterialTheme.colorScheme.primary
-                                    r.code in 400..499 -> Color(0xFFF59E0B)
-                                    else -> Color(0xFFF87171)
-                                }
                                 Text(if (r.code > 0) r.code.toString() else "ERR",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = codeColor, fontFamily = FontFamily.Monospace)
@@ -722,12 +1050,48 @@ private fun RequestTab(ctx: Context) {
                                 Text("${r.costMs}ms", style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(r.url, style = MaterialTheme.typography.labelSmall,
+                            Text(
+                                r.url, style = MaterialTheme.typography.labelSmall,
                                 fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = if (open) Int.MAX_VALUE else 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             if (r.error.isNotBlank()) {
-                                Text(r.error, style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.error)
+                                Text(
+                                    r.error, style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error,
+                                    maxLines = if (open) Int.MAX_VALUE else 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                            if (open) {
+                                Divider(color = MaterialTheme.colorScheme.outlineVariant)
+                                Text("时间: ${r.timeText()}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    GlassActionButton(
+                                        onClick = { copyToClipboard(ctx, r.toLine(), "已复制该条请求") },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Icon(Icons.Default.ContentCopy, null, Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("复制这条", fontSize = 11.sp)
+                                    }
+                                    GlassActionButton(
+                                        onClick = {
+                                            DebugStore.removeRequest(r.time, r.url)
+                                            expanded = null
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Icon(Icons.Default.Delete, null, Modifier.size(15.dp))
+                                        Spacer(Modifier.width(4.dp))
+                                        Text("删除这条", fontSize = 11.sp)
+                                    }
+                                }
                             }
                         }
                     }

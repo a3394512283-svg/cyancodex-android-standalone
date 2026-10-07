@@ -195,18 +195,24 @@ object AppState {
             Session.token = prevToken
             Session.cookie = prevCookie
             com.canglan.cyancodex.data.ApiClient.reset()
-            throw RuntimeException(
-                r.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
-                    ?: r.getOrNull()?.error?.takeIf { it.isNotBlank() }
-                    ?: if (st.token != null)
-                        "服务端不认这个令牌（可能已过期或被吊销）"
-                    else
-                        "服务端没有通过这个 Cookie 识别到登录态（可能已过期，或该 Cookie 不属于本服务器）"
-            )
+            val why = r.exceptionOrNull()?.message?.takeIf { it.isNotBlank() }
+                ?: r.getOrNull()?.error?.takeIf { it.isNotBlank() }
+                ?: if (st.token != null)
+                    "服务端不认这个令牌（可能已过期或被吊销）"
+                else
+                    "服务端没有通过这个 Cookie 识别到登录态（可能已过期，或该 Cookie 不属于本服务器）"
+            // ★ 埋点 (2026-10-07): 导入失败是"看起来像 bug 的正常结果", 必须留痕
+            com.canglan.cyancodex.data.DebugStore.logE("Auth", "登录态导入失败 → 已回滚: $why")
+            throw RuntimeException(why)
         }
         // ★ 只有"靠 cookie 认的身份"才需要哨兵占位 —— 有真 token 时别覆盖它。
         if (st.token == null) Session.token = Session.COOKIE_TOKEN
         Session.saveUser(u)
+        com.canglan.cyancodex.data.DebugStore.logI(
+            "Auth",
+            "登录态导入成功: ${u.nickname ?: u.username ?: "当前账号"}" +
+                if (st.token == null) " (Cookie 登录)" else " (令牌登录)",
+        )
         user = u
         token = Session.token
         // 登录后开启后台常驻收消息 (与 setLogin 一致)

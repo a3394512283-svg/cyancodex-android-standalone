@@ -556,7 +556,7 @@ suspend fun <T> safeApi(block: suspend () -> ApiResp<T>): ApiResp<T> =
     try { block() }
     catch (e: kotlinx.coroutines.CancellationException) { throw e }
     catch (e: Exception) {
-        com.canglan.cyancodex.data.DebugStore.log("Api", "调用异常: ${e.javaClass.simpleName}: ${e.message}")
+        com.canglan.cyancodex.data.DebugStore.logE("Api", "调用异常: ${e.javaClass.simpleName}: ${e.message}")
         ApiResp(ok = false, error = errText(e))
     }
 
