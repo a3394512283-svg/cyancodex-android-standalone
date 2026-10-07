@@ -36,6 +36,39 @@ object Updater {
     fun isCoexistBuild(context: Context): Boolean =
         context.packageName != OFFICIAL_PACKAGE
 
+    /**
+     * 本版能否走「下载官方包 → 调系统安装器」这条自更新通道。
+     *
+     * ★★ 2026-10-07 新增。**共存版不能走这条路** —— 官方包 applicationId 是
+     * [OFFICIAL_PACKAGE]，本版是 `...cyancodex.com`，`install()` 里的 applicationId
+     * 防呆会拒绝；而那个拒绝是**静默的**（只打一条 Log.w，用户零提示），
+     * 调用方紧接着回退 `openInBrowser()` → **白下两遍**（约 3 MB × 2），
+     * 最后装出来是**另一个 App**，本版一点没变。
+     *
+     * ⚠️ 注意签名校验那一关是**过得去**的：官方包与本版用同一个 keystore
+     * （`21cdf37f…2bff`），`sameSignerAsSelf()` 返回 true，所以拦截点确实只在
+     * applicationId —— 别以为签名能兜住。
+     *
+     * ★ 为什么做成方法，而不是让各 UI 自己判 [isCoexistBuild]：
+     *   实测「下载并安装」入口有 **3 个**（关于页「检查更新」/ 首页公告弹窗 /
+     *   公告列表页更新公告），而 [isCoexistBuild] 此前只在 AppNav 的**强制更新门禁**
+     *   里用过一次 —— 那 3 个**全漏了**。判断散在 N 处必然漏一处，
+     *   所以下沉到唯一一层：UI 只问"能不能自更新"，不问"我是不是共存版"。
+     *
+     * 官方版下本方法恒为 true，行为与改动前完全一致。
+     */
+    fun canSelfUpdate(context: Context): Boolean = !isCoexistBuild(context)
+
+    /**
+     * 共存版在「发现新版本」时应显示的说明。
+     *
+     * 放在这里而不是各 UI 里各写一份 —— 三处入口文案不一致的话，
+     * 用户看到的行为解释会互相矛盾。
+     */
+    const val COEXIST_UPDATE_HINT: String =
+        "本版是共存版（安装包标识与官方不同），官方安装包属于另一个应用，无法直接覆盖更新。" +
+            "请下载新版本源码后重新打包替换。"
+
     private val client = OkHttpClient.Builder()
         .dns(ServerDns)                            // 安装包同样走直连高防主服务器
         .connectTimeout(25, TimeUnit.SECONDS)
@@ -175,12 +208,22 @@ object Updater {
             // 防呆: 安装包的 applicationId 必须与本应用一致, 否则装下去是"另一个 App"。
             // 共存版下载到的官方包就属于这种情况 —— 直接拒绝, 让调用方回退到浏览器下载,
             // 而不是静默地多装一个官方版出来。
+            //
+            // ★ 2026-10-07: 这里原本**只有一条 Log.w**, 用户完全看不到 —— 于是表现为
+            //   "点了更新, 转了一圈, 啥也没发生"。现在补一条可见提示。
+            //   注意: 正常路径**不该走到这里**(UI 层已按 canSelfUpdate 分流),
+            //   这条是安全网 —— 万一将来又新增了入口忘了分流, 至少不会静默。
             val archivePkg = runCatching {
                 @Suppress("DEPRECATION")
                 context.packageManager.getPackageArchiveInfo(file.absolutePath, 0)?.packageName
             }.getOrNull()
             if (archivePkg != null && archivePkg != context.packageName) {
                 Log.w(TAG, "拒绝安装非本应用的安装包: $archivePkg (本应用 ${context.packageName})")
+                android.widget.Toast.makeText(
+                    context,
+                    "这是其他应用的安装包（$archivePkg），无法覆盖当前版本",
+                    android.widget.Toast.LENGTH_LONG,
+                ).show()
                 return false
             }
             val uri: Uri = FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)

@@ -97,6 +97,11 @@ fun AboutScreen(nav: NavHostController) {
     var checkMsg by remember { mutableStateOf("") }
     var showLicenseDialog by remember { mutableStateOf(false) }
 
+    // ★★ 2026-10-07: 本版能否走「下载官方包并安装」的自更新通道。
+    //   共存版为 false —— 判据下沉在 Updater.canSelfUpdate() 里, 不在这里直接判
+    //   isCoexistBuild, 因为"下载并安装"入口共 3 个, 各判各的必然漏。
+    val selfUpdate = remember { Updater.canSelfUpdate(ctx) }
+
     // ===== 隐藏调试模式：连点版本号 7 次解锁 =====
     // 已解锁后再点 → 直接进调试面板（不用再点 7 次）
     var tapCount by remember { mutableStateOf(0) }
@@ -382,17 +387,37 @@ fun AboutScreen(nav: NavHostController) {
         LaunchedEffect(up.url) { progress = -1f }
         AlertDialog(
             onDismissRequest = { updateInfo = null },
-            title = { Text("发现新版本 v${up.version}") },
-            text = { Text("最新版本 v${up.version} 已发布，点击「下载安装」一键更新。") },
+            title = {
+                Text(if (selfUpdate) "发现新版本 v${up.version}" else "上游发布新版本 v${up.version}")
+            },
+            text = {
+                Text(
+                    if (selfUpdate) {
+                        "最新版本 v${up.version} 已发布，点击「下载安装」一键更新。"
+                    } else {
+                        // ★★ 2026-10-07 修: 共存版不分流的话 —— 白下约 3MB 官方包 →
+                        //   install() 的 applicationId 防呆**静默**拒绝(只有 Log.w) →
+                        //   回退 openInBrowser 再下一次 → 最后装出**另一个 App**, 本版没变。
+                        "检测到官方新版本 v${up.version}。\n\n" + Updater.COEXIST_UPDATE_HINT
+                    }
+                )
+            },
             confirmButton = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (progress >= 0f) {
+                    if (selfUpdate && progress >= 0f) {
                         Text(if (progress == -2f) "下载中…" else "下载中 ${(progress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary)
                     }
                     TextButton(onClick = { updateInfo = null }) { Text("知道了") }
-                    if (progress < 0f) {
+                    if (!selfUpdate) {
+                        // 共存版: 只给"打开下载页" —— 不下载、不安装, 避免上面那条死路
+                        TextButton(onClick = {
+                            val url = com.canglan.cyancodex.data.Session.baseUrl.trimEnd('/') + up.url
+                            updateInfo = null
+                            Updater.openInBrowser(ctx, url)
+                        }) { Text("打开下载页", color = MaterialTheme.colorScheme.primary) }
+                    } else if (progress < 0f) {
                         TextButton(onClick = {
                             val url = com.canglan.cyancodex.data.Session.baseUrl.trimEnd('/') + up.url
                             scope.launch {

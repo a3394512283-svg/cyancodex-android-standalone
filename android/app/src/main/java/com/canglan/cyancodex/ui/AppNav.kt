@@ -690,7 +690,10 @@ fun AppNav() {
             confirmButton = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val isUpdate = a.type == "update" && versionNewer(a.version)
-                    if (isUpdate && dlProgress >= 0f) {
+                    // ★★ 2026-10-07: 共存版不能"下载官方包并安装"(见 Updater.canSelfUpdate 注释)。
+                    //   这是 3 个自更新入口中的第 2 个 —— 之前只判了 isUpdate, 没判共存版。
+                    val selfUpdate = isUpdate && Updater.canSelfUpdate(ctx)
+                    if (selfUpdate && dlProgress >= 0f) {
                         Text(if (dlProgress == -2f) "下载中…" else "下载中 ${(dlProgress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary)
@@ -703,7 +706,19 @@ fun AppNav() {
                             navController.navigate(Routes.SCHOOL_SHARE)
                         }) { Text("去参与", color = MaterialTheme.colorScheme.primary) }
                     }
-                    if (isUpdate && dlProgress < 0f) {
+                    // 共存版: 更新公告只给"打开下载页", 不下载不安装
+                    if (isUpdate && !selfUpdate) {
+                        TextButton(onClick = {
+                            val v = a.version
+                            annDialog = null
+                            scope.launch {
+                                val url = Updater.resolveUrl(v)
+                                    ?: v?.takeIf { it.isNotBlank() }?.let { Updater.apkUrl(it) }
+                                if (url != null) Updater.openInBrowser(ctx, url)
+                            }
+                        }) { Text("打开下载页", color = MaterialTheme.colorScheme.primary) }
+                    }
+                    if (selfUpdate && dlProgress < 0f) {
                         TextButton(onClick = {
                             scope.launch {
                                 val url = Updater.resolveUrl(a.version)

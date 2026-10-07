@@ -59,6 +59,22 @@ fun AnnouncementsScreen(nav: NavHostController) {
             // 活动公告 (开学季福利等): 跳转活动页
             nav.navigate(Routes.SCHOOL_SHARE)
         } else if (a.type == "update" && versionNewer(a.version)) {
+            // ★★ 2026-10-07: 共存版不分流会走进死路 —— 下载官方包 → install() 的
+            //   applicationId 防呆**静默**拒绝 → 回退浏览器再下一次 → 装出另一个 App。
+            //   这是 3 个自更新入口中的第 3 个(关于页 / 首页公告弹窗 / 本页)。
+            if (!Updater.canSelfUpdate(ctx)) {
+                scope.launch {
+                    val url = Updater.resolveUrl(a.version)
+                        ?: a.version?.takeIf { it.isNotBlank() }?.let { Updater.apkUrl(it) }
+                    if (url == null) {
+                        Toast.makeText(ctx, "获取更新地址失败，请稍后重试", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(ctx, "共存版请手动替换安装包，已打开下载页", Toast.LENGTH_LONG).show()
+                        Updater.openInBrowser(ctx, url)
+                    }
+                }
+                return
+            }
             // 更新公告: 自动下载并安装
             scope.launch {
                 downloading = true
@@ -118,9 +134,17 @@ fun AnnouncementsScreen(nav: NavHostController) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 4)
                             if (a.type == "update") {
                                 Spacer(Modifier.height(4.dp))
-                                Text(if (versionNewer(a.version)) "点击自动下载更新 →" else "已是最新版本",
+                                // ★ 2026-10-07: 共存版不说"自动下载更新" —— 它做不到(见 handleTap)
+                                val newer = versionNewer(a.version)
+                                val selfUpdate = Updater.canSelfUpdate(ctx)
+                                Text(
+                                    when {
+                                        !newer -> "已是最新版本"
+                                        selfUpdate -> "点击自动下载更新 →"
+                                        else -> "点击前往下载页 →"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = if (versionNewer(a.version)) MaterialTheme.colorScheme.primary
+                                    color = if (newer) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
