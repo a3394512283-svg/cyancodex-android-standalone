@@ -47,12 +47,49 @@ android {
             optimization {
                 enable = true
             }
+            // 体积: 移除未被引用的资源。前置条件是 R8 已开启(见上面的 optimization)。
+            // 本工程**没有** getIdentifier / getResourceEntryName 之类的动态资源查找
+            // (已全仓 grep 确认), 所以 shrink 不会误删运行时才引用的资源。
+            // 实测可删掉 okhttp 的 publicsuffixes.gz(41 KB, 其宿主类已被 R8 裁掉) 等。
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
             signingConfig = if (rootProject.file("keystore.properties").exists())
                 signingConfigs.getByName("release") else signingConfigs.getByName("debug")
+        }
+    }
+
+    // 体积: 只保留中英文资源。
+    // 依赖库(androidx / compose / material3)自带 80+ 个语言的字符串与排版资源,
+    // 全部合并进 resources.arsc 是纯粹的体积浪费 —— 本 App 面向中文用户。
+    // 实测: arsc 从 112,988 B 降到 13,660 B (省 99 KB)。
+    // ★ 若将来要做多语言, 记得把对应 locale 加回来, 否则该语言会回落到默认(英文)。
+    // ⚠️ 用 localeFilters, 不要用 defaultConfig.resourceConfigurations ——
+    //    AGP 9 起后者会打 deprecation 警告, 官方已声明将移除。
+    androidResources {
+        localeFilters += listOf("zh", "en")
+    }
+
+    packaging {
+        resources {
+            // 体积: 剔除运行时用不到的元数据。
+            // ⚠️ 这里**故意不动** META-INF 下的 LICENSE.txt —— 那是 Apache-2.0 要求的
+            //    许可证副本, 省下的十几 KB 不值得冒合规风险。
+            excludes += setOf(
+                // kotlinx-coroutines 的调试探针, 只在 IDE attach 调试器时被读
+                "DebugProbesKt.bin",
+                // okhttp 的公共后缀表 (41 KB)。它是 Java 资源 —— shrinkResources 管不到
+                // (那只处理 res/ 下的 Android 资源), 只能用 packaging 过滤。
+                // 安全性依据: 其唯一宿主类 okhttp3.internal.publicsuffix.PublicSuffixDatabase
+                // 已被 R8 裁掉(见 usage.txt), 且本工程未配置 CookieJar, 不存在读取路径。
+                "okhttp3/internal/publicsuffix/publicsuffixes.gz",
+                // androidx 各库的版本标记, 运行时无人读
+                "META-INF/*.version",
+                // AGP 生成的 VCS 信息
+                "META-INF/version-control-info.textproto",
+            )
         }
     }
 
