@@ -1,5 +1,6 @@
 package com.canglan.cyancodex.ai
 
+import com.canglan.cyancodex.data.FreeAi
 import com.canglan.cyancodex.data.Session
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -30,7 +31,7 @@ import java.util.concurrent.TimeUnit
  * ⚠️ **接口形态对 ≠ 网络能连通**: 本机实测 `api.search.brave.com:443` TCP 不通
  * (同一时刻其余几家全通), 所以 Brave 在列表里排最后并带红字警告 —— 见 [SearchEngine.warn]。
  */
-enum class SearchKind { EXA, TINYFISH, BRAVE, SERPER, TAVILY, BOCHA, ZHIPU }
+enum class SearchKind { CYAN, EXA, TINYFISH, BRAVE, SERPER, TAVILY, BOCHA, ZHIPU }
 
 data class SearchEngine(
     val id: String,
@@ -44,9 +45,35 @@ data class SearchEngine(
     val verified: Boolean,
     /** 需要提醒用户的坑, 显示成红字; 空串 = 没有 */
     val warn: String = "",
+    /**
+     * ★ 是否需要用户自备 Key。
+     *
+     * `false` = 由服务端托管 Key (见 [SearchKind.CYAN]), 配置页不显示 Key 输入框,
+     * [isConfigured] 也不看 Key。
+     */
+    val needsKey: Boolean = true,
 )
 
+/**
+ * 「免费搜索」引擎的 id。
+ *
+ * 需要特判它的地方 (配置页默认预选、保存时不写 Key 槽、[AiSearch.isConfigured] 不看 Key)
+ * 一律引用这个常量, **不要写字面量** —— 否则将来改 id 会漏改。
+ */
+const val FREE_SEARCH_ID = "cyan"
+
 val SEARCH_ENGINES: List<SearchEngine> = listOf(
+    // ★★ 2026-10-16 新增: **免费搜索** —— 排在最前面, 因为它不需要用户做任何准备。
+    //   用户原话:「sk-tinyfish-… 也加个免费搜索」。
+    //   Key 放在服务端 (见 ai_server.py 的 /api/v1/ai/search), 客户端拿不到,
+    //   所以既不会被反编译刷爆, 也能随时按账号限额、随时换 Key 而不用发新版。
+    //   ⚠️ 需要登录态 —— 和「限时免费」AI 通道同一个门槛。
+    SearchEngine(
+        id = FREE_SEARCH_ID, name = "免费搜索",
+        hint = "无需自备 Key，由 CyanCodex 提供（需登录）",
+        consoleUrl = "",
+        kind = SearchKind.CYAN, verified = true, needsKey = false,
+    ),
     SearchEngine(
         id = "exa", name = "Exa",
         hint = "语义搜索，返回与问题最相关的网页片段",
@@ -170,9 +197,16 @@ object AiSearch {
      *
      * ⚠️ 走 [Session.hasSearchKey] 而不是 `Session.aiSearchKey.isNotBlank()`:
      * 后者要过 Keystore 解密, 而这个函数是在组合期调的。
+     *
+     * ★ 2026-10-16: 「免费搜索」([SearchKind.CYAN]) 不需要 Key —— 它的 Key 在服务端,
+     *   选中即算配好。这样用户一进配置页就能直接把搜索用起来, 不用先去注册任何账号
+     *   (当然用的时候仍要登录 CyanCodex 账号, 那个失败信息由服务端给, 比"按钮根本不出现"清楚得多)。
      */
-    fun isConfigured(): Boolean =
-        Session.aiSearchEngine.isNotBlank() && Session.hasSearchKey()
+    fun isConfigured(): Boolean {
+        val eng = engine() ?: return false
+        if (!eng.needsKey) return true
+        return Session.hasSearchKey()
+    }
 
     fun engine(): SearchEngine? = SEARCH_ENGINES.firstOrNull { it.id == Session.aiSearchEngine }
 
@@ -181,6 +215,8 @@ object AiSearch {
     /** 搜一次。失败直接抛, 由调用方决定怎么呈现 */
     suspend fun search(query: String, limit: Int = 5): List<WebHit> = withContext(Dispatchers.IO) {
         val eng = engine() ?: throw RuntimeException("还没配置搜索引擎")
+        // ★ 免费搜索不需要本机 Key —— 见 [isConfigured] 的注释
+        if (!eng.needsKey) return@withContext run(eng.kind, query, "", limit)
         val key = Session.aiSearchKey.trim()
         if (key.isBlank()) throw RuntimeException("还没填搜索引擎的 Key")
         run(eng.kind, query, key, limit)
@@ -190,8 +226,10 @@ object AiSearch {
     private fun run(kind: SearchKind, query: String, key: String, limit: Int): List<WebHit> {
         // ★ Key 统一在这里洗。搜和测共用这道门, 所以两边看到的字符一定是同一串 ——
         //   否则会出现"测试通过、发消息却 401"这种最让人抓狂的情况。
+        //   (免费搜索没有 Key, 洗不洗都一样)
         val k = cleanApiKey(key)
         return when (kind) {
+            SearchKind.CYAN -> cyanFree(query, limit)
             SearchKind.EXA -> exa(query, k, limit)
             SearchKind.TINYFISH -> tinyfish(query, k, limit)
             SearchKind.BRAVE -> brave(query, k, limit)
@@ -218,7 +256,8 @@ object AiSearch {
         val eng = SEARCH_ENGINES.firstOrNull { it.id == engineId }
             ?: return@withContext SearchTest(false, "先选一个搜索引擎")
         val k = key.trim()
-        if (k.isBlank()) return@withContext SearchTest(false, "还没填 Key")
+        // ★ 免费搜索没有 Key 可填 —— 直接测
+        if (eng.needsKey && k.isBlank()) return@withContext SearchTest(false, "还没填 Key")
         try {
             val hits = run(eng.kind, "OpenAI", k, 3)
             SearchTest(true, "连接正常，${eng.name} 返回了 ${hits.size} 条结果")
@@ -230,6 +269,51 @@ object AiSearch {
     // ---------------------------------------------------------------------------------
     //  各家实现
     // ---------------------------------------------------------------------------------
+
+    /**
+     * ★★ **免费搜索** —— `GET https://cyancodex.bluestudio.cn/api/v1/ai/search?q=...&n=...`
+     *
+     * 与「限时免费」AI 通道同源: **Key 在服务端**, 客户端只带账号令牌。
+     * 鉴权 / 每日额度 / 失败退款全在服务端做 (见 `ai_server.py` 的 `_ai_search`)。
+     *
+     * 为什么不把 TinyFish 的 Key 打进 APK:
+     *   ① 反编译就能拿走, 免费额度一天被刷爆;
+     *   ② 换 Key / 关停都得发新版本, 而服务端改一个配置就行。
+     *
+     * ⚠️ 需要登录态。未登录时服务端回 401, 这里的做法是**把服务端的原话抛出去** ——
+     *    「请先登录账号后再使用免费搜索」比笼统的"搜索失败"有用得多。
+     */
+    private fun cyanFree(query: String, limit: Int): List<WebHit> {
+        val base = try {
+            FreeAi.baseUrl(Session.appCtx)
+        } catch (e: Exception) {
+            throw RuntimeException("应用还没初始化完成，稍后再试")
+        }
+        val url = base.trimEnd('/') + "/search?q=" + enc(query) + "&n=" + limit
+        val b = Request.Builder()
+            .url(url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "CyanCodex-Android")
+        // 没登录时**故意不发** Authorization —— 让服务端给出那句"请先登录"
+        FreeAi.token()?.let { b.header("Authorization", "Bearer " + it) }
+        runCatching { b.header("X-Device-Id", Session.deviceId) }
+
+        client.newCall(b.build()).execute().use { resp ->
+            val text = resp.body?.string().orEmpty()
+            // ★ 服务端的错误消息就是写给用户看的, 原样抛 —— 不要再包一层"搜索失败", 那会
+            //   把最有用的那句话淹掉。
+            if (!resp.isSuccessful) throw RuntimeException(errOf(text))
+            val list = try {
+                hits(JSONObject(text).optJSONArray("results")) { o ->
+                    WebHit(jsonStr(o, "title"), jsonStr(o, "url"), jsonStr(o, "snippet"))
+                }
+            } catch (e: Exception) {
+                throw RuntimeException("免费搜索返回格式不认识：${text.take(160)}")
+            }
+            if (list.isEmpty()) throw RuntimeException("免费搜索没有搜到结果")
+            return list
+        }
+    }
 
     /**
      * Exa —— `POST https://api.exa.ai/search`, 头 `x-api-key`。

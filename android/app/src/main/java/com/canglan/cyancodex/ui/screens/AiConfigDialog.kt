@@ -38,6 +38,7 @@ import com.canglan.cyancodex.ai.AiClient
 import com.canglan.cyancodex.ai.AiModelInfo
 import com.canglan.cyancodex.ai.AiSearch
 import com.canglan.cyancodex.ai.CUSTOM_PROVIDER_ID
+import com.canglan.cyancodex.ai.FREE_SEARCH_ID
 import com.canglan.cyancodex.ai.SEARCH_ENGINES
 import com.canglan.cyancodex.ai.THINK_LEVELS
 import com.canglan.cyancodex.data.FreeAi
@@ -121,9 +122,14 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
     var useFree by remember { mutableStateOf(Session.aiUseFree) }
     // 是否走「自备 Key」那条路 —— 下面多处分支都用它, 免得到处写 !useOfficial && !useFree
     val useOwnKey = !useOfficial && !useFree
-    // 免费通道状态: 打开设置页时探测一次, 决定要不要显示那个选项
-    var freeStatus by remember { mutableStateOf<FreeAi.Status?>(null) }
-    LaunchedEffect(Unit) { freeStatus = FreeAi.status(ctx) }
+    // ★★ 免费通道状态 (2026-10-16 修「展示免费入口还要等待几秒」):
+    //   原先初始值是 null, 得等 LaunchedEffect 里那次**网络请求**回来才画得出 ——
+    //   经 Cloudflare 一圈实测好几秒, 用户点进来看到的是"这一整块空白", 像卡住了。
+    //   现在先用**本地缓存**立刻画出来 ([FreeAi.cachedStatus] 纯读 SharedPreferences, 零延迟),
+    //   同时后台刷新, 拿到新值再覆盖。
+    //   ⚠️ 冷启动第一次(没有任何缓存)仍要等一次网络 —— 那是没法避免的, 但只此一次。
+    var freeStatus by remember { mutableStateOf(FreeAi.cachedStatus(ctx)) }
+    LaunchedEffect(Unit) { FreeAi.status(ctx)?.let { freeStatus = it } }
     var base by remember { mutableStateOf(Session.aiApiBase) }
     var key by remember { mutableStateOf(Session.aiApiKey) }
     var model by remember { mutableStateOf(Session.aiModel) }
@@ -144,7 +150,13 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
     var probe by remember { mutableStateOf<AiClient.ThinkProbe?>(null) }
 
     // ---- 智能搜索 (可选) ----
-    var searchEngine by remember { mutableStateOf(Session.aiSearchEngine) }
+    // ★ 2026-10-16: 从没配过搜索的用户 (aiSearchEngine 为空) 默认**预选「免费搜索」**——
+    //   它不需要任何准备, 是这个页面里唯一"选一下就能用"的引擎。
+    //   ⚠️ 只预选**界面状态**, 不落盘: 用户不点「保存」就什么都不会改,
+    //      点「不用」也能明确关掉, 不会出现"我没配过却被偷偷打开了"。
+    var searchEngine by remember {
+        mutableStateOf(Session.aiSearchEngine.ifBlank { FREE_SEARCH_ID })
+    }
     var searchKey by remember { mutableStateOf(Session.aiSearchKey) }
     var searchKeyVisible by remember { mutableStateOf(false) }
     var searchTesting by remember { mutableStateOf(false) }
@@ -269,9 +281,16 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                             },
                         )
                     }
-                    // 「限时免费」—— 服务端开着、且本地有可用账号令牌时才出现。
+                    // 「限时免费」—— 本地有可用账号令牌时出现。
                     // Cookie 登录没有真令牌 (见 FreeAi 注释), 这种情况下不显示。
-                    if (freeStatus?.enabled == true && FreeAi.canUse()) {
+                    //
+                    // ★★ 2026-10-16 修「展示免费入口还要等待几秒」: 判据从
+                    //   `freeStatus?.enabled == true` 改成 **`!= false`**。
+                    //   原写法在"还没有缓存、网络也还没回来"时 freeStatus 是 null,
+                    //   于是整个「限时免费」选项要等好几秒才冒出来 —— 用户报的就是这个。
+                    //   现在: 说开着 → 显示; **还没结论 → 也显示**(额度那行写"检测中");
+                    //   只有服务端**明确**回了 false 才隐藏。
+                    if (freeStatus?.enabled != false && FreeAi.canUse()) {
                         item {
                             GlassFilterChip(
                                 selected = useFree,
@@ -352,7 +371,8 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                                     )
                                     append("\n由二改作者提供，不消耗积分、也不用自备 Key。")
                                     append("请求经作者服务器转发，上游密钥不会下发到本机。")
-                                    freeStatus?.let { append("\n" + it.quotaText()) }
+                                    // ★ 状态还没回来时如实说"检测中", 不要空着让人以为没额度
+                                    append("\n" + (freeStatus?.quotaText() ?: "正在检测额度…"))
                                 },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -590,7 +610,10 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                 CfgSection(
                     "3", "联网搜索",
                     "可选。不配就没有联网能力；配置后输入框会出现「智能搜索」按钮。",
-                    status = if (searchEngine.isNotBlank() && searchKey.isNotBlank()) "已配置" else "",
+                    // ★ 2026-10-16: 「免费搜索」不需要 Key —— 选中就算配好了 (见 SearchEngine.needsKey)
+                    status = if (searchEngine.isNotBlank() &&
+                        (searchKey.isNotBlank() || curEngine?.needsKey == false)
+                    ) "已配置" else "",
                     statusOk = true,
                 )
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -622,43 +645,56 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                         Text(curEngine.warn, style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error)
                     }
-                    OutlinedTextField(
-                        value = searchKey,
-                        onValueChange = { searchKey = it; searchTest = null },
-                        label = { Text("${curEngine.name} API Key") },
-                        singleLine = true,
-                        visualTransformation = if (searchKeyVisible) VisualTransformation.None
-                        else PasswordVisualTransformation(),
-                        // ★ capitalization = None 是必需的: Key 都以小写 `sk-` 开头,
-                        //   输入法自动首字母大写会把它变成 `Sk-`, 服务端只回一句
-                        //   "Invalid or expired API key" —— 用户完全看不出是自己被输入法坑了。
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Password,
-                            capitalization = KeyboardCapitalization.None,
-                        ),
-                        trailingIcon = {
-                            IconButton(onClick = { searchKeyVisible = !searchKeyVisible }) {
-                                Icon(
-                                    if (searchKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                    if (searchKeyVisible) "隐藏" else "显示",
-                                    modifier = Modifier.size(18.dp),
-                                )
-                            }
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    // 字符数摊出来 —— Key 抄错一个字符时, 长度对不上是一眼就能看出的线索。
-                    // ★ 这里报的是**洗完之后的**长度: 若与原始长度不同, 说明里面有不可见字符,
-                    //   直接点出来, 免得用户对着"看起来一模一样"的两串字符怀疑人生。
-                    if (searchKey.isNotBlank()) {
-                        val ck = cleanApiKey(searchKey)
-                        val dirty = ck.length != searchKey.trim().length
+                    // ★★ 2026-10-16: 「免费搜索」的 Key 在服务端 (见 AiSearch.cyanFree),
+                    //   这里**不显示 Key 输入框** —— 摆一个填不了的框只会让人以为还得自己去申请。
+                    //   改成把"谁在出这个 Key + 今日还剩几次"直接写出来。
+                    if (curEngine.needsKey) {
+                        OutlinedTextField(
+                            value = searchKey,
+                            onValueChange = { searchKey = it; searchTest = null },
+                            label = { Text("${curEngine.name} API Key") },
+                            singleLine = true,
+                            visualTransformation = if (searchKeyVisible) VisualTransformation.None
+                            else PasswordVisualTransformation(),
+                            // ★ capitalization = None 是必需的: Key 都以小写 `sk-` 开头,
+                            //   输入法自动首字母大写会把它变成 `Sk-`, 服务端只回一句
+                            //   "Invalid or expired API key" —— 用户完全看不出是自己被输入法坑了。
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Password,
+                                capitalization = KeyboardCapitalization.None,
+                            ),
+                            trailingIcon = {
+                                IconButton(onClick = { searchKeyVisible = !searchKeyVisible }) {
+                                    Icon(
+                                        if (searchKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        if (searchKeyVisible) "隐藏" else "显示",
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        // 字符数摊出来 —— Key 抄错一个字符时, 长度对不上是一眼就能看出的线索。
+                        // ★ 这里报的是**洗完之后的**长度: 若与原始长度不同, 说明里面有不可见字符,
+                        //   直接点出来, 免得用户对着"看起来一模一样"的两串字符怀疑人生。
+                        if (searchKey.isNotBlank()) {
+                            val ck = cleanApiKey(searchKey)
+                            val dirty = ck.length != searchKey.trim().length
+                            Text(
+                                "已填 ${ck.length} 个字符（开头是「${ck.take(3)}」）" +
+                                    (if (dirty) " · 已自动清掉 ${searchKey.trim().length - ck.length} 个不可见字符" else ""),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (dirty) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        // 免费搜索: 把额度摆出来 —— 用户最关心的就是"今天还能搜几次"
                         Text(
-                            "已填 ${ck.length} 个字符（开头是「${ck.take(3)}」）" +
-                                (if (dirty) " · 已自动清掉 ${searchKey.trim().length - ck.length} 个不可见字符" else ""),
+                            "无需填写 Key：搜索由 CyanCodex 服务端提供，需要登录账号。" +
+                                (freeStatus?.let { "（${it.searchQuotaText()}）" } ?: ""),
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (dirty) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                     // ★ 顺序 (2026-10-01 用户要求): 「去申请 Key」**优先级最高** ——
@@ -668,22 +704,25 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        GlassTextButton(onClick = { openConsole(curEngine.consoleUrl) }) {
-                            Text("去申请 Key", style = MaterialTheme.typography.labelMedium)
-                        }
-                        GlassTextButton(onClick = {
-                            // 走系统剪贴板而不是 Compose 的 LocalClipboardManager ——
-                            // 后者在新版 Compose 里已被替换, 换个 BOM 版本就可能编译不过。
-                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
-                            val clip = cm?.primaryClip?.let { c ->
-                                if (c.itemCount > 0) c.getItemAt(0).coerceToText(ctx).toString() else ""
+                        // 免费搜索既没有"去申请 Key"也没有"粘贴" —— 它压根没有 Key 可填
+                        if (curEngine.needsKey) {
+                            GlassTextButton(onClick = { openConsole(curEngine.consoleUrl) }) {
+                                Text("去申请 Key", style = MaterialTheme.typography.labelMedium)
                             }
-                            if (!clip.isNullOrBlank()) {
-                                searchKey = cleanApiKey(clip)
-                                searchTest = null
+                            GlassTextButton(onClick = {
+                                // 走系统剪贴板而不是 Compose 的 LocalClipboardManager ——
+                                // 后者在新版 Compose 里已被替换, 换个 BOM 版本就可能编译不过。
+                                val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                                val clip = cm?.primaryClip?.let { c ->
+                                    if (c.itemCount > 0) c.getItemAt(0).coerceToText(ctx).toString() else ""
+                                }
+                                if (!clip.isNullOrBlank()) {
+                                    searchKey = cleanApiKey(clip)
+                                    searchTest = null
+                                }
+                            }) {
+                                Text("粘贴", style = MaterialTheme.typography.labelMedium)
                             }
-                        }) {
-                            Text("粘贴", style = MaterialTheme.typography.labelMedium)
                         }
                         GlassActionButton(
                             onClick = {
@@ -694,7 +733,8 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                                     searchTesting = false
                                 }
                             },
-                            enabled = !searchTesting && searchKey.isNotBlank(),
+                            // 免费搜索不靠 Key, 选中了就能测
+                            enabled = !searchTesting && (searchKey.isNotBlank() || !curEngine.needsKey),
                         ) {
                             Text(if (searchTesting) "测试中…" else "测试搜索",
                                 style = MaterialTheme.typography.labelMedium)
@@ -746,7 +786,9 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                             }
                             Session.aiSearchEngine = searchEngine
                             // 只写当前这家引擎的那一格; searchEngine 为空(不用)时不写, 老 Key 留着
-                            if (searchEngine.isNotBlank()) {
+                            // ★ 2026-10-16: 免费搜索 (needsKey=false) 不写 Key 槽 ——
+                            //   它没有 Key, 写个空密文进去只会让 hasSearchKeyFor 误报成"已配置"。
+                            if (searchEngine.isNotBlank() && curEngine?.needsKey != false) {
                                 Session.setSearchKeyFor(searchEngine, searchKey.trim())
                             }
                             // 工具轮数上限 —— 两条通道共用, 所以**不受 useOfficial 影响**
