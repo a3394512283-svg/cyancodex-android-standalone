@@ -14,7 +14,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.BugReport
 import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Feedback
@@ -44,10 +47,13 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavHostController
 import com.canglan.cyancodex.data.ApiClient
 import com.canglan.cyancodex.data.Session
+import com.canglan.cyancodex.data.SettingsBackup
 import com.canglan.cyancodex.ime.CyanCodexImeSettings
 import com.canglan.cyancodex.overlay.FloatWindowService
 import com.canglan.cyancodex.ui.AppState
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.canglan.cyancodex.ui.Routes
 import com.canglan.cyancodex.ui.components.AppTopBar
 import com.canglan.cyancodex.ui.components.GlassActionButton
@@ -62,6 +68,10 @@ fun SettingsScreen(nav: NavHostController) {
     val scope = rememberCoroutineScope()
 
     var savedMsg by remember { mutableStateOf("") }
+    // 设置云端备份 / 恢复
+    var showBackup by remember { mutableStateOf(false) }
+    var showRestore by remember { mutableStateOf(false) }
+    var backupStamp by remember { mutableStateOf(0L) }
     var reduceMotion by remember { mutableStateOf(Session.reduceMotion) }
     var animScale by remember { mutableStateOf(Session.animationsScale) }
     var canOverlay by remember { mutableStateOf(Settings.canDrawOverlays(ctx)) }
@@ -665,6 +675,35 @@ fun SettingsScreen(nav: NavHostController) {
                 Text(savedMsg, color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodySmall)
             }
 
+            // ===== 数据与备份 =====
+            //
+            // 二改独有: 把本机全部设置加密后备份到自建服务 (cyancodex.bluestudio.cn)。
+            // 加密在设备上用「备份码」派生的密钥完成, 服务端只存密文 —— 见 SettingsBackup 类注释。
+            SectionHeader("数据与备份")
+
+            SectionCard("设置云端备份") {
+                Text("把本机全部设置打包加密后上传，换机或重装时用备份码恢复。加密在设备上完成，服务器只保存密文，看不到你的任何内容。",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                SettingEntry(
+                    icon = Icons.Default.CloudUpload,
+                    title = "备份设置到云端",
+                    subtitle = run {
+                        backupStamp   // 备份成功后自增, 用于触发重组刷新副标题
+                        val t = SettingsBackup.lastTime(ctx)
+                        if (t <= 0L) "尚未备份过"
+                        else "上次备份 " + java.text.SimpleDateFormat(
+                            "yyyy-MM-dd HH:mm", java.util.Locale.getDefault()
+                        ).format(java.util.Date(t * 1000))
+                    },
+                ) { showBackup = true }
+                SettingEntry(
+                    icon = Icons.Default.CloudDownload,
+                    title = "用备份码恢复",
+                    subtitle = "输入备份码，恢复设置后自动重启",
+                ) { showRestore = true }
+            }
+
             SectionHeader("关于与支持")
 
             // ===== 开源组件声明 =====
@@ -713,7 +752,138 @@ fun SettingsScreen(nav: NavHostController) {
                 }
             }
         }
+
+        if (showBackup) {
+            BackupDialog(
+                onDismiss = { showBackup = false },
+                onDone = { backupStamp = System.currentTimeMillis() },
+            )
+        }
+        if (showRestore) {
+            RestoreDialog(onDismiss = { showRestore = false })
+        }
     }
+}
+
+/**
+ * 备份对话框。
+ *
+ * 备份码是**唯一**的解密凭证 —— 服务端零知识, 丢了谁也救不回来, 所以这里
+ * 把"请立即保存"写得非常显眼, 并给了复制按钮。
+ */
+@Composable
+private fun BackupDialog(onDismiss: () -> Unit, onDone: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf(SettingsBackup.newCode()) }
+    var busy by remember { mutableStateOf(false) }
+    var msg by remember { mutableStateOf("") }
+    var err by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("备份设置到云端") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "备份码是恢复设置的唯一凭证，请立即保存到安全的地方。忘记备份码将无法恢复。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = {},
+                    readOnly = true,
+                    singleLine = true,
+                    label = { Text("备份码") },
+                    trailingIcon = {
+                        IconButton(onClick = {
+                            val cm = ctx.getSystemService(Context.CLIPBOARD_SERVICE)
+                                as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("备份码", code))
+                            msg = "已复制到剪贴板"
+                        }) { Icon(Icons.Default.ContentCopy, contentDescription = "复制") }
+                    },
+                )
+                if (msg.isNotBlank()) {
+                    Text(msg, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.secondary)
+                }
+                if (err.isNotBlank()) {
+                    Text(err, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = {
+                scope.launch {
+                    busy = true; err = ""; msg = ""
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching { SettingsBackup.backup(ctx, code) }
+                    }
+                    busy = false
+                    r.onSuccess {
+                        msg = "备份成功（%d 项设置，%.1f KB）".format(
+                            it.keyCount, it.sizeBytes / 1024.0)
+                        onDone()
+                    }.onFailure { err = it.message ?: "备份失败" }
+                }
+            }) { Text(if (busy) "备份中…" else "开始备份") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("关闭") } },
+    )
+}
+
+/**
+ * 恢复对话框。恢复会**覆盖本机现有设置**, 所以文案里明确写清楚, 且必须二次点击确认。
+ */
+@Composable
+private fun RestoreDialog(onDismiss: () -> Unit) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var code by remember { mutableStateOf(SettingsBackup.lastCode(ctx)) }
+    var busy by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("用备份码恢复设置") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "恢复会用云端备份覆盖本机现有设置（账号、AI 配置、快捷指令、主题等），完成后 App 会自动重启。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                OutlinedTextField(
+                    value = code,
+                    onValueChange = { code = it; err = "" },
+                    singleLine = true,
+                    label = { Text("备份码") },
+                    placeholder = { Text("XXXX-XXXX-XXXX-XXXX") },
+                    isError = err.isNotBlank(),
+                )
+                if (err.isNotBlank()) {
+                    Text(err, style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy && code.isNotBlank(), onClick = {
+                scope.launch {
+                    busy = true; err = ""
+                    val r = withContext(Dispatchers.IO) {
+                        runCatching { SettingsBackup.restore(ctx, code) }
+                    }
+                    busy = false
+                    r.onSuccess { restartApp(ctx) }
+                        .onFailure { err = it.message ?: "恢复失败" }
+                }
+            }) { Text(if (busy) "恢复中…" else "恢复并重启") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss, enabled = !busy) { Text("取消") } },
+    )
 }
 
 /**

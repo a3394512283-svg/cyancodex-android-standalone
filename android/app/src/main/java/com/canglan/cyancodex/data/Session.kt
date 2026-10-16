@@ -444,6 +444,17 @@ object Session {
         get() = sp.getBoolean("ai_use_official", !hasAiKey())
         set(v) { sp.edit().putBoolean("ai_use_official", v).apply() }
 
+    /**
+     * 「限时免费」通道 —— 二改自带, 与 [aiUseOfficial] 互斥。
+     *
+     * 开启后 AI 请求走 `cyancodex.bluestudio.cn` 中转: 服务端先校验账号登录态、
+     * 再查每日额度, 通过后用**作者自己的**上游 Key 转发。客户端拿不到上游 Key。
+     * 详见 [FreeAi]。
+     */
+    var aiUseFree: Boolean
+        get() = sp.getBoolean("ai_use_free", false)
+        set(v) { sp.edit().putBoolean("ai_use_free", v).apply() }
+
     var aiModel: String
         get() = sp.getString("ai_model", "gpt-4o-mini")!!
         set(v) { sp.edit().putString("ai_model", v).apply() }

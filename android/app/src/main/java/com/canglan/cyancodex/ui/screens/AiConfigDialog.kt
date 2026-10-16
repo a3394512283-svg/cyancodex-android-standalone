@@ -40,6 +40,7 @@ import com.canglan.cyancodex.ai.AiSearch
 import com.canglan.cyancodex.ai.CUSTOM_PROVIDER_ID
 import com.canglan.cyancodex.ai.SEARCH_ENGINES
 import com.canglan.cyancodex.ai.THINK_LEVELS
+import com.canglan.cyancodex.data.FreeAi
 import com.canglan.cyancodex.ai.ThinkLevel
 import com.canglan.cyancodex.ai.cleanApiKey
 import com.canglan.cyancodex.ai.decodeModels
@@ -116,6 +117,13 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
     // 「官方 AI（消耗积分）」—— 显式选项。配了自备 Key 之后也得能切回来,
     // 否则想临时用一次官方能力就只能把 Key 删掉。
     var useOfficial by remember { mutableStateOf(Session.aiUseOfficial) }
+    // 「限时免费」—— 二改自带的第三个通道 (见 data/FreeAi)。与上面两条互斥。
+    var useFree by remember { mutableStateOf(Session.aiUseFree) }
+    // 是否走「自备 Key」那条路 —— 下面多处分支都用它, 免得到处写 !useOfficial && !useFree
+    val useOwnKey = !useOfficial && !useFree
+    // 免费通道状态: 打开设置页时探测一次, 决定要不要显示那个选项
+    var freeStatus by remember { mutableStateOf<FreeAi.Status?>(null) }
+    LaunchedEffect(Unit) { freeStatus = FreeAi.status(ctx) }
     var base by remember { mutableStateOf(Session.aiApiBase) }
     var key by remember { mutableStateOf(Session.aiApiKey) }
     var model by remember { mutableStateOf(Session.aiModel) }
@@ -261,16 +269,34 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                             },
                         )
                     }
+                    // 「限时免费」—— 服务端开着、且本地有可用账号令牌时才出现。
+                    // Cookie 登录没有真令牌 (见 FreeAi 注释), 这种情况下不显示。
+                    if (freeStatus?.enabled == true && FreeAi.canUse()) {
+                        item {
+                            GlassFilterChip(
+                                selected = useFree,
+                                onClick = {
+                                    useFree = true
+                                    useOfficial = false
+                                    result = null
+                                    probe = null
+                                },
+                                label = {
+                                    Text("限时免费", style = MaterialTheme.typography.labelMedium)
+                                },
+                            )
+                        }
+                    }
                     items(AI_PROVIDERS) { p ->
                         GlassFilterChip(
-                            selected = !useOfficial && providerId == p.id,
+                            selected = useOwnKey && providerId == p.id,
                             onClick = { useOfficial = false; pick(p.id) },
                             label = { Text(p.name, style = MaterialTheme.typography.labelMedium) },
                         )
                     }
                     item {
                         GlassFilterChip(
-                            selected = !useOfficial && providerId == CUSTOM_PROVIDER_ID,
+                            selected = useOwnKey && providerId == CUSTOM_PROVIDER_ID,
                             onClick = {
                                 useOfficial = false
                                 providerId = CUSTOM_PROVIDER_ID
@@ -308,7 +334,34 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                     }
                 }
 
-                if (!useOfficial) {
+                // ---- 选了「限时免费」----
+                if (useFree) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(Modifier.padding(12.dp)) {
+                            Text("使用限时免费通道", style = MaterialTheme.typography.labelMedium)
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                buildString {
+                                    append(
+                                        freeStatus?.announcement?.ifBlank { "限时免费体验中" }
+                                            ?: "限时免费体验中"
+                                    )
+                                    append("\n由二改作者提供，不消耗积分、也不用自备 Key。")
+                                    append("请求经作者服务器转发，上游密钥不会下发到本机。")
+                                    freeStatus?.let { append("\n" + it.quotaText()) }
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+
+                if (useOwnKey) {
                     // ---- 地址 ----
                     OutlinedTextField2(base, { base = it; result = null; modelErr = ""; probe = null }, "API 地址",
                         placeholder = "https://api.deepseek.com/v1/")
@@ -368,7 +421,7 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                         // 不是全局动作。原来跟「保存」并排放在最底下, 用户会以为它在测整个 App
                         // 的链路/网络。放这里就近反馈, 也不会被误读。
                         // 官方通道没有"连接"可测 —— 藏起来比给个点了就报错的按钮强。
-                        if (!useOfficial) {
+                        if (useOwnKey) {
                             GlassActionButton(
                                 onClick = {
                                     testing = true
@@ -423,7 +476,7 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                 CfgSection("2", "模型行为", "跟用哪家服务商无关，两条通道都生效。")
 
                 // 思考强度只在自备 Key 通道下可调 —— 官方通道的思考由服务端控制。
-                if (!useOfficial) {
+                if (useOwnKey) {
                     // 开关在输入框那个「深度思考」chip 上 (跟 DeepSeek 客户端一致, 随手可切);
                     // 这里只放"开到什么强度"。
                     Row(
@@ -683,8 +736,9 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                         filled = true,
                         onClick = {
                             Session.aiUseOfficial = useOfficial
+                            Session.aiUseFree = useFree
                             // 选了官方就**别动**用户已经存好的自备配置 —— 下次切回来还在
-                            if (!useOfficial) {
+                            if (useOwnKey) {
                                 Session.aiApiBase = normalizeAiBase(base)
                                 Session.aiApiKey = cleanApiKey(key)
                                 Session.aiModel = model.trim().ifBlank { "gpt-4o-mini" }
@@ -703,12 +757,12 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                             onDismiss()
                         },
                     ) { Text("保存") }
-                    if (!useOfficial && preset?.consoleUrl?.isNotBlank() == true) {
+                    if (useOwnKey && preset?.consoleUrl?.isNotBlank() == true) {
                         GlassTextButton(onClick = { openConsole(preset.consoleUrl) }) {
                             Text("去申请 Key", style = MaterialTheme.typography.labelMedium)
                         }
                     }
-                    if (!useOfficial) {
+                    if (useOwnKey) {
                         GlassTextButton(
                             onClick = {
                                 base = ""
@@ -725,16 +779,23 @@ fun AiConfigDialog(onDismiss: () -> Unit) {
                                 // 配置清空了, 自然回落到官方 AI
                                 Session.aiUseOfficial = true
                                 useOfficial = true
+                                Session.aiUseFree = false
+                                useFree = false
                             },
                         ) { Text("清除配置", style = MaterialTheme.typography.labelMedium) }
                     }
                 }
 
                 Text(
-                    if (useOfficial)
-                        "官方通道：提问会经本 App 的服务器转发给官方模型，按积分计费。"
-                    else
-                        "Key 只存在本机 (加密保存)。请求由本机直连服务商, 不经过本 App 的服务器。",
+                    when {
+                        useFree ->
+                            "免费通道：提问经二改作者的服务器转发，不消耗积分、无需自备 Key。" +
+                                "上游密钥只在服务端，不会下发到本机。"
+                        useOfficial ->
+                            "官方通道：提问会经本 App 的服务器转发给官方模型，按积分计费。"
+                        else ->
+                            "Key 只存在本机 (加密保存)。请求由本机直连服务商, 不经过本 App 的服务器。"
+                    },
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

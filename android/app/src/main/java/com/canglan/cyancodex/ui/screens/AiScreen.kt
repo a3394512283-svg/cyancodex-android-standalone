@@ -65,6 +65,7 @@ import com.canglan.cyancodex.data.AiMode
 import com.canglan.cyancodex.data.AiToolEvent
 import com.canglan.cyancodex.data.Attachment
 import com.canglan.cyancodex.data.FeedbackReq
+import com.canglan.cyancodex.data.FreeAi
 import com.canglan.cyancodex.data.UiMsg
 import com.canglan.cyancodex.data.ApiClient
 import com.canglan.cyancodex.data.Session
@@ -306,7 +307,14 @@ fun AiScreen(nav: NavHostController) {
     //
     // ★ 还要看 aiUseOfficial: 用户可以在设置里显式选「用官方 AI(消耗积分)」——
     //   配了自备 Key 也能切回去。以前判断条件只有"有没有 Key", 一旦配了就再也回不到官方。
-    val hasKey = Session.hasAiKey() && !Session.aiUseOfficial
+    //
+    // ★★ 2026-10-16 再加「限时免费」通道: 它同样不走积分、不用本机 Key(用的是账号令牌),
+    //    所以对**发送门槛**而言和自备 Key 是一回事 —— 下面统一用 hasKey 表示
+    //    "走非官方通道, 可以直接发"。真正的通道选择在 AiTaskRunner 里再判一次。
+    val useFree = Session.aiUseFree && FreeAi.canUse()
+    val hasKey = (Session.hasAiKey() && !Session.aiUseOfficial) || useFree
+    // 「深度思考」只在自备 Key 时才有意义: 免费通道走服务端中转, 思考参数不透传(见服务端白名单)。
+    val thinkReady = hasKey && !useFree
 
     // 「深度思考」开关 —— 放在输入框里 (对齐 DeepSeek 客户端: 开关随手可切, 不埋在设置里)。
     // 只在配了自备 API 时才有意义: 平台 AI 走服务器代理, 发不了思考参数。
@@ -1286,9 +1294,9 @@ fun AiScreen(nav: NavHostController) {
                             //   「指令专家 / 语法核对」已挪到新建对话时选(见 AiModePicker / AiMode) ——
                             //   用户要求"不要换行" + "类似 WorkBuddy 在新建对话时选"。
                             //   ⚠️ 判据也放宽: 只要**可能**有开关可显示就渲染(不然这行会塌掉)。
-                            if (hasKey || searchReady) {
+                            if (thinkReady || searchReady) {
                                 AiToolChips(
-                                    thinkReady = hasKey,
+                                    thinkReady = thinkReady,
                                     thinkOn = thinkOn,
                                     onThink = { thinkOn = !thinkOn; Session.aiThinkOn = thinkOn },
                                     searchOn = searchOn,
@@ -1407,9 +1415,9 @@ fun AiScreen(nav: NavHostController) {
                         // 开关 —— 两个外观分支都要有, 免得只有开玻璃才看得见
                         // ★ 2026-10-05: 这一行**只剩**深度思考/智能搜索 (与玻璃分支逐字对齐)。
                         //   指令专家/语法核对已挪到新建对话时选。
-                        if (hasKey || searchReady) {
+                        if (thinkReady || searchReady) {
                             AiToolChips(
-                                thinkReady = hasKey,
+                                thinkReady = thinkReady,
                                 thinkOn = thinkOn,
                                 onThink = { thinkOn = !thinkOn; Session.aiThinkOn = thinkOn },
                                 searchOn = searchOn,

@@ -11,6 +11,7 @@ import com.canglan.cyancodex.data.AiMode
 import com.canglan.cyancodex.data.AiToolEvent
 import com.canglan.cyancodex.data.ApiClient
 import com.canglan.cyancodex.data.DebugStore
+import com.canglan.cyancodex.data.FreeAi
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.UiMsg
 import com.canglan.cyancodex.ui.components.errText
@@ -481,25 +482,32 @@ object AiTaskRunner {
             var ok = false
             try {
                 // ★ 每轮都重新读 Session: 用户在等待期间可能改了模型/轮数, 以"发出去那一刻"为准更符合直觉
-                val useKey = Session.hasAiKey() && !Session.aiUseOfficial
+                // ★ 免费通道优先判定: 它不需要本机 Key, 只要有账号令牌。
+                //   三条通道共用下面同一套 OpenAI 兼容调用, 只有 base/key/model 不同 ——
+                //   免费通道的 base 指向中转服务, key 换成账号令牌 (见 FreeAi 类注释)。
+                val useFree = Session.aiUseFree && FreeAi.canUse()
+                val useKey = Session.hasAiKey() && !Session.aiUseOfficial && !useFree
+                val chanBase = if (useFree) FreeAi.baseUrl(ctx) else Session.aiApiBase
+                val chanKey = if (useFree) (FreeAi.token() ?: "") else Session.aiApiKey
+                val chanModel = if (useFree) "CyanFree" else Session.aiModel
                 // ★ 埋点 (2026-10-07): AI 任务是最常被追问"为什么没反应"的地方,
                 //   开始 / 结束 / 异常三段都要留痕, 才能判断是"没发出去"还是"发出去了但失败"。
                 DebugStore.logI(
                     "Ai",
-                    "任务开始 · ${if (useKey) "自备Key" else "官方通道"} · " +
-                        "模型=${if (useKey) Session.aiModel else "官方默认"} · " +
+                    "任务开始 · ${if (useFree) "限时免费" else if (useKey) "自备Key" else "官方通道"} · " +
+                        "模型=${if (useFree) chanModel else if (useKey) Session.aiModel else "官方默认"} · " +
                         "联网=$searchOn · 专家=$cmdExpert · 轮数=${Session.aiToolRounds}",
                 )
                 // ★ 2026-10-05: 工具闸由**模式**决定, 在 send() 入口就算好了 (见那里的注释) ——
                 //   这里是闭包捕获, 等待期间用户改设置不会影响已经发出去的这一轮。
-                if (useKey) {
-                    // ---- 自备 API: 本机直连 ----
+                if (useKey || useFree) {
+                    // ---- 自备 API 直连 / 限时免费中转: 都是 OpenAI 兼容, 共用这套调用 ----
                     val r = AiClient.chat(
                         history = history,
-                        base = Session.aiApiBase,
-                        key = Session.aiApiKey,
-                        model = Session.aiModel,
-                        think = Session.effectiveThink(),
+                        base = chanBase,
+                        key = chanKey,
+                        model = chanModel,
+                        think = if (useFree) ThinkLevel.AUTO else Session.effectiveThink(),
                         searchTool = searchOn,
                         cmdExpert = cmdExpert,
                         syntaxCheck = syntaxCheck,
