@@ -21,10 +21,13 @@ android {
         applicationId = "com.canglan.cyancodex.com"
         minSdk = 26
         targetSdk = 36
-        // 版本规则: 每次更新 versionName 加 0.0.1 (1.0.11 -> 1.0.12 -> 1.0.13 ...)
-        // versionCode = major*10000 + minor*100 + patch (必须随更新递增)
-        versionCode = 20000
-        versionName = "2.0.0"
+        // 版本规则 (2026-10-17 用户改):
+        //   versionName 末位 +0.01 —— 2.0.0 -> 2.0.01 -> 2.0.02 ...
+        //   (原规则是 +0.0.1, 步长太小, 用户要求改大)
+        //   versionCode 每次发版 +1, **不再**用 major*10000+minor*100+patch 推导 ——
+        //   那个公式在末位涨到 100 时会和 minor+1 撞车 (2.0.100 与 2.1.0 都算 20100)。
+        versionCode = 20003
+        versionName = "2.0.03"
     }
 
     signingConfigs {
@@ -89,6 +92,11 @@ android {
                 "META-INF/*.version",
                 // AGP 生成的 VCS 信息
                 "META-INF/version-control-info.textproto",
+                // ★ 2026-10-17 体积优化: Kotlin 内建类型元数据(kotlin/**/*.kotlin_builtins,
+                //   约 12 KB)。它只给 kotlin-reflect 做内省用; 本工程**没有**引入
+                //   kotlin-reflect(mapping.txt 里 0 处 kotlin.reflect.jvm.internal),
+                //   运行时无人读取, 可以安全剔除。
+                "kotlin/**",
             )
         }
     }
@@ -113,10 +121,16 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
-    implementation(libs.androidx.compose.material)
+    // ★ 2026-10-17 体积优化: 删掉 `androidx.compose.material`(M2)。
+    //   全仓 grep 确认没有任何 `androidx.compose.material.*`(非 material3 / 非 icons)
+    //   的引用; material-icons-extended 的 POM 也只依赖 material-icons-core,
+    //   不依赖完整 M2。留着它只会让 R8 多扫一遍无用输入。
+    // implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
-    implementation(libs.androidx.compose.ui.tooling.preview)
+    // ★ 2026-10-17 体积优化: ui-tooling-preview 只在 IDE 预览/调试时需要,
+    //   release 包不需要它(全仓没有 @Preview)。从 implementation 降为 debugImplementation。
+    debugImplementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.viewmodel.compose)

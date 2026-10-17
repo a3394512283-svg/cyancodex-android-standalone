@@ -59,6 +59,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.draw.clip
+import com.canglan.cyancodex.ui.components.RemoteNoticeDialog
 import com.canglan.cyancodex.ui.components.safeApi
 import com.canglan.cyancodex.ui.components.versionBelow
 import com.canglan.cyancodex.ui.components.versionNewer
@@ -397,6 +398,9 @@ fun AppNav() {
         currentRoute == Routes.ANNOUNCEMENTS
 
     Box(Modifier.fillMaxSize()) {
+        // ★ 2026-10-17: 服务端公告。按 notice_id 去重, 同一条只弹一次;
+        //   管理员改 id 才会重新弹 (见 ui/components/RemoteNotice.kt)。
+        RemoteNoticeDialog()
         Scaffold(
         // 容器保持不透明: 采样源被它盖住, 仅透过玻璃可见 —— 避免整屏被换掉背景
         containerColor = MaterialTheme.colorScheme.background,

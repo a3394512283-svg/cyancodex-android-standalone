@@ -6,12 +6,14 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import com.canglan.cyancodex.data.AnnouncementNotifier
+import com.canglan.cyancodex.data.AppConfig
 import com.canglan.cyancodex.data.AppForeground
 import com.canglan.cyancodex.data.DebugStore
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.SpeedTest
 import com.canglan.cyancodex.data.TamperDetector
 import com.canglan.cyancodex.plugin.PluginManager
+import kotlinx.coroutines.launch
 
 class CyanCodexApp : Application() {
     override fun onCreate() {
@@ -48,7 +50,29 @@ class CyanCodexApp : Application() {
         // 工具箱: 网络测速的历史记录存储
         SpeedTest.init(this)
 
+        // ★★ 2026-10-17: 配置中心 —— 拉公告 / 远程开关 / 最新版本。
+        //   刻意**异步且不等待**: 它是"让界面更准"的信息, 不该拖慢冷启动。
+        //   失败也不做任何提示 (离线启动是正常场景, 用缓存值即可)。
+        refreshRemoteConfig()
+
         DebugStore.logI("App", "启动流程结束 · 耗时 ${System.currentTimeMillis() - t0}ms")
+    }
+
+    /**
+     * 后台刷新服务端配置。
+     *
+     * 只发一次请求, 不重试 —— 拿不到就用上一次的缓存 (见 [AppConfig.cachedFlags])。
+     * 用 IO 调度器而不是裸 Thread, 是为了让它跟其它协程一起被结构化并发管理。
+     */
+    private fun refreshRemoteConfig() {
+        runCatching {
+            kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                val ok = AppConfig.refresh(this@CyanCodexApp)
+                DebugStore.logD("AppConfig", if (ok) "远端配置已刷新" else "远端配置拉取失败, 使用缓存")
+            }
+        }.onFailure {
+            DebugStore.logW("AppConfig", "配置刷新启动失败: ${it.message}")
+        }
     }
 
     /**

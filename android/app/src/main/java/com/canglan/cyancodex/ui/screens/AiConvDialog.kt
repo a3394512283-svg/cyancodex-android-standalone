@@ -14,7 +14,6 @@ import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FactCheck
 import androidx.compose.material.icons.filled.Forum
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
@@ -54,8 +53,6 @@ fun AiConvDrawer(
     onNew: () -> Unit,
     onRename: (String, String) -> Unit,
     onDelete: (String) -> Unit,
-    /** 跳到服务器端历史 (原顶栏那个 History 图标; 挪进来是因为顶栏已经放不下第 4 个按钮) */
-    onServerHistory: () -> Unit,
     onClose: () -> Unit,
 ) {
     var renaming by remember { mutableStateOf<AiConv?>(null) }
@@ -82,8 +79,8 @@ fun AiConvDrawer(
     ) {
         // ★★ 抽屉内容整体上移「全局底栏高度」—— 2026-10-01 修掉的一个真 bug。
         //
-        // 现象: 最底下那行「服务器端历史记录」**点不到**。实测点它的坐标 (400,2285) 命中的是
-        //       底栏的「广场」页签, 直接跳走了 —— 按钮被底栏完整吞掉。
+        // 现象: 抽屉最底部的内容**点不到**。实测点它的坐标 (400,2285) 命中的是
+        //       底栏的「广场」页签, 直接跳走了 —— 内容被底栏完整吞掉。
         //
         // 根因: 玻璃开启时 AppNav 会**去掉 NavHost 的底部内缩**(`navModifier = padding(top=…)`),
         //       让内容一路铺到屏幕底, 这样底栏玻璃下面才是真实内容而不是纯色(见 AppNav 的注释)。
@@ -166,18 +163,6 @@ fun AiConvDrawer(
                     }
                 }
             }
-        }
-
-        // ---- 底部: 只有服务器端历史入口 ----
-        // ⛔ 不放用户头像/昵称 —— 用户明确要求删掉参考图底部那一块。
-        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-        TextButton(
-            onClick = onServerHistory,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
-        ) {
-            Icon(Icons.Default.History, null, Modifier.size(15.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("服务器端历史记录", style = MaterialTheme.typography.labelMedium)
         }
         }   // ← 闭合"给底栏让位"的 Column
     }

@@ -38,6 +38,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.ThumbDown
@@ -66,6 +67,7 @@ import com.canglan.cyancodex.data.AiToolEvent
 import com.canglan.cyancodex.data.Attachment
 import com.canglan.cyancodex.data.FeedbackReq
 import com.canglan.cyancodex.data.FreeAi
+import com.canglan.cyancodex.data.Share
 import com.canglan.cyancodex.data.UiMsg
 import com.canglan.cyancodex.data.ApiClient
 import com.canglan.cyancodex.data.Session
@@ -368,10 +370,6 @@ fun AiScreen(nav: NavHostController) {
                     curId = if (next.isBlank()) AiConvStore.ensureCurrent().id else next
                     convs = AiConvStore.list()
                 },
-                onServerHistory = {
-                    scope.launch { drawerState.close() }
-                    if (AppState.token == null) nav.navigate(Routes.LOGIN) else nav.navigate(Routes.AI_HISTORY)
-                },
                 onClose = { scope.launch { drawerState.close() } },
             )
         },
@@ -420,6 +418,31 @@ fun AiScreen(nav: NavHostController) {
                 navIcon = Icons.Default.Menu,
                 onNav = { scope.launch { drawerState.open() } },
                 actions = {
+                // ★ 2026-10-17: 分享**整段对话** (只分享单条仍走气泡长按菜单)。
+                //   整段对话在群里传播时比单条回答有用得多, 所以给个顶栏常驻入口。
+                TopBarAction(onClick = {
+                    val conv = AiConvStore.current()
+                    if (conv == null || conv.messages.isEmpty()) {
+                        android.widget.Toast.makeText(
+                            ctx, "当前对话还没有内容", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    } else if (!Share.canShare(ctx)) {
+                        android.widget.Toast.makeText(
+                            ctx, "分享需要先登录账号", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        scope.launch {
+                            val r = Share.createConversation(ctx, conv.title, conv.messages)
+                            if (r.ok) {
+                                copyToClipboard(ctx, r.url, "链接已复制，可直接粘贴")
+                            } else {
+                                android.widget.Toast.makeText(
+                                    ctx, "分享失败：" + r.message, android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                }) { Icon(Icons.Default.Share, "分享对话") }
                 // 新对话: ★ 2026-10-05 起先弹**模式选择**(通用对话/指令编写/语法核对),
                 //   不再直接建一条空会话 —— 用户要求"类似 WorkBuddy 在新建对话时选择"。
                 //   (原版是**清空**当前会话 —— 上一轮永久丢失)
@@ -1001,7 +1024,11 @@ fun AiScreen(nav: NavHostController) {
                                     }
                                 }
 
-                                // 长按菜单。「分享」按需求不做。
+                                // 长按菜单。
+                                // ★ 2026-10-17: 原注释写的是「『分享』按需求不做」。
+                                //   现在加了服务端分享短链, 这一项有了真正的落地方式 ——
+                                //   分享出去的是一个**公开网页**, 对方不用装 App 就能看,
+                                //   比发截图实用得多。仅在已登录且服务端开关打开时可用。
                                 DropdownMenu(expanded = menuIdx == idx, onDismissRequest = { menuIdx = -1 }) {
                                     DropdownMenuItem(
                                         text = { Text("复制") },
@@ -1011,6 +1038,41 @@ fun AiScreen(nav: NavHostController) {
                                         onClick = {
                                             copyToClipboard(ctx, m.content, if (mine) "已复制" else "已复制 AI 回复")
                                             menuIdx = -1
+                                        },
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("分享链接") },
+                                        leadingIcon = {
+                                            Icon(Icons.Default.Share, null, modifier = Modifier.size(18.dp))
+                                        },
+                                        onClick = {
+                                            menuIdx = -1
+                                            if (!Share.canShare(ctx)) {
+                                                android.widget.Toast.makeText(
+                                                    ctx, "分享需要先登录账号", android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            } else {
+                                                android.widget.Toast.makeText(
+                                                    ctx, "正在生成分享链接…", android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                                scope.launch {
+                                                    val r = Share.create(
+                                                        ctx,
+                                                        AiConvStore.current()?.title ?: "指令分享",
+                                                        m.content,
+                                                        "cmd",
+                                                    )
+                                                    if (r.ok) {
+                                                        // 直接复制到剪贴板 —— 用户下一步必然是粘贴
+                                                        copyToClipboard(ctx, r.url, "链接已复制，可直接粘贴")
+                                                    } else {
+                                                        android.widget.Toast.makeText(
+                                                            ctx, "分享失败：" + r.message,
+                                                            android.widget.Toast.LENGTH_LONG
+                                                        ).show()
+                                                    }
+                                                }
+                                            }
                                         },
                                     )
                                     DropdownMenuItem(

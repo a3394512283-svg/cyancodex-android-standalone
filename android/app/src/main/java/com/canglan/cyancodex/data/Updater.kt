@@ -37,37 +37,24 @@ object Updater {
         context.packageName != OFFICIAL_PACKAGE
 
     /**
-     * 本版能否走「下载官方包 → 调系统安装器」这条自更新通道。
+     * 本版能否走「下载 APK → 调系统安装器」这条自更新通道。
      *
-     * ★★ 2026-10-07 新增。**共存版不能走这条路** —— 官方包 applicationId 是
-     * [OFFICIAL_PACKAGE]，本版是 `...cyancodex.com`，`install()` 里的 applicationId
-     * 防呆会拒绝；而那个拒绝是**静默的**（只打一条 Log.w，用户零提示），
-     * 调用方紧接着回退 `openInBrowser()` → **白下两遍**（约 3 MB × 2），
-     * 最后装出来是**另一个 App**，本版一点没变。
+     * ★★ 2026-10-17 改：更新源已从官方（app.blueworkshop.top）切到**自建服务器**
+     *   （cyancodex.bluestudio.cn/dl），下发的是本工程自己打的包，applicationId
+     *   与共存版完全一致，所以共存版**可以**直接覆盖安装。
      *
-     * ⚠️ 注意签名校验那一关是**过得去**的：官方包与本版用同一个 keystore
-     * （`21cdf37f…2bff`），`sameSignerAsSelf()` 返回 true，所以拦截点确实只在
-     * applicationId —— 别以为签名能兜住。
-     *
-     * ★ 为什么做成方法，而不是让各 UI 自己判 [isCoexistBuild]：
-     *   实测「下载并安装」入口有 **3 个**（关于页「检查更新」/ 首页公告弹窗 /
-     *   公告列表页更新公告），而 [isCoexistBuild] 此前只在 AppNav 的**强制更新门禁**
-     *   里用过一次 —— 那 3 个**全漏了**。判断散在 N 处必然漏一处，
-     *   所以下沉到唯一一层：UI 只问"能不能自更新"，不问"我是不是共存版"。
-     *
-     * 官方版下本方法恒为 true，行为与改动前完全一致。
+     *   原先返回 false 是为了拦官方包（applicationId 不同，装下去是另一个 App）。
+     *   现在源站换成了自己的包，这个拦截没有意义了。
+     *   安全网仍在：install() 会核对签名 + applicationId，来路不对的包依旧装不进去。
      */
-    fun canSelfUpdate(context: Context): Boolean = !isCoexistBuild(context)
+    fun canSelfUpdate(context: Context): Boolean = true
 
     /**
-     * 共存版在「发现新版本」时应显示的说明。
-     *
-     * 放在这里而不是各 UI 里各写一份 —— 三处入口文案不一致的话，
-     * 用户看到的行为解释会互相矛盾。
+     * 发现新版本时的说明（仅在特殊情况下展示）。
      */
     const val COEXIST_UPDATE_HINT: String =
-        "本版是共存版（安装包标识与官方不同），官方安装包属于另一个应用，无法直接覆盖更新。" +
-            "请下载新版本源码后重新打包替换。"
+        "更新包由自建服务器下发，点击「下载安装」即可覆盖更新；" +
+            "若系统拦截安装，请授权「安装未知应用」后重试，或在浏览器中打开下载地址手动安装。"
 
     private val client = OkHttpClient.Builder()
         .dns(ServerDns)                            // 安装包同样走直连高防主服务器
@@ -75,24 +62,63 @@ object Updater {
         .readTimeout(120, TimeUnit.SECONDS)
         .build()
 
-    /** 下载服务器 (源站) */
+    /**
+     * 更新源：自建服务器（不再走官方 app.blueworkshop.top）。
+     *
+     * 服务端 `/api/v1/app/version` 返回平铺字段（latest / url / size / md5 / ...），
+     * 这里映射成 [UpdateInfo]，UI 层不需要感知两套结构。
+     */
+    private const val UPDATE_API = "https://cyancodex.bluestudio.cn/api/v1/app/version"
+
+    /** 下载服务器（自建） */
     private val downloadBases: List<String> by lazy {
-        listOf(Session.baseUrl.trimEnd('/'))
+        listOf("https://cyancodex.bluestudio.cn")
     }
 
-    /** 按发版约定生成下载地址 */
+    /** 按发版约定生成下载地址（服务端实际路径：/dl/CyanCodex-<版本>.apk） */
     fun apkUrl(version: String): String =
-        downloadBases.first() + "/downloads/CyanCodex-v" + version.trimStart('v') + ".apk"
+        downloadBases.first() + "/dl/CyanCodex-" + version.trimStart('v') + ".apk"
+
+    /** 相对路径补全成绝对地址；已是 http(s) 就原样返回。 */
+    fun absoluteUrl(url: String): String =
+        if (url.startsWith("http")) url else downloadBases.first() + url
 
     /**
-     * 服务器权威下载地址: 优先 /api/update/latest 返回的真实文件地址,
-     * 失败时回退为按版本号拼接的约定地址。
+     * 从自建服务器拉取最新版本信息。
+     * 失败（网络 / 非 200 / ok!=true）返回 null，由调用方决定提示文案。
+     */
+    suspend fun fetchLatest(): UpdateInfo? = withContext(Dispatchers.IO) {
+        try {
+            val req = okhttp3.Request.Builder().url(UPDATE_API)
+                .header("Accept", "application/json")
+                .build()
+            client.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@withContext null
+                val text = resp.body?.string() ?: return@withContext null
+                val o = com.google.gson.JsonParser().parse(text).asJsonObject
+                if (!(o.get("ok")?.asBoolean ?: false)) return@withContext null
+                UpdateInfo(
+                    version = o.get("latest")?.asString.orEmpty(),
+                    url = o.get("url")?.asString.orEmpty(),
+                    size = o.get("size")?.asLong ?: 0L,
+                    md5 = o.get("md5")?.asString.orEmpty(),
+                    sha256 = o.get("sha256")?.asString.orEmpty(),
+                    minVersion = "",
+                )
+            }
+        } catch (e: Exception) {
+            DebugStore.logW("Updater", "检查更新失败: ${e.message}")
+            null
+        }
+    }
+
+    /**
+     * 服务器权威下载地址：优先用版本接口返回的 url，失败时回退为按版本号拼接。
      */
     suspend fun resolveUrl(fallbackVersion: String?): String? {
-        val latest = try { ApiClient.get().latestUpdate() } catch (e: Exception) { null }
-        val data = latest?.data
+        val data = fetchLatest()
         if (data != null && data.url.isNotBlank()) {
-            return downloadBases.first() + data.url
+            return absoluteUrl(data.url)
         }
         return fallbackVersion?.let { apkUrl(it) }
     }
@@ -148,7 +174,7 @@ object Updater {
                 if (ok) {
                     // 审计 F1 修复：下载完必须校验哈希（原来只看 HTTP 2xx 就安装）。
                     // 期望值取服务端 /api/update/latest 的 md5 / sha256，任一不匹配即删除文件、视为失败。
-                    val expect = try { ApiClient.get().latestUpdate()?.data } catch (e: Exception) { null }
+                    val expect = try { fetchLatest() } catch (e: Exception) { null }
                     val wantMd5 = expect?.md5.orEmpty().trim()
                     val wantSha = expect?.sha256.orEmpty().trim()
                     if (wantMd5.isNotBlank() || wantSha.isNotBlank()) {

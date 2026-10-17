@@ -147,4 +147,15 @@ object AiConvStore {
             )
         })
     }
+
+    /**
+     * 用给定列表**整体替换**本地会话。
+     *
+     * ★ 2026-10-17: 供 [com.canglan.cyancodex.data.ConvSync] 云同步合并后回写。
+     *   合并逻辑必须在"一份完整快照"上做 —— 如果边遍历边逐条写回，
+     *   每次 [write] 都会重新序列化整个列表，N 条会话就是 N 次全量写盘。
+     */
+    fun replaceAll(list: List<AiConv>) {
+        write(list)
+    }
 }

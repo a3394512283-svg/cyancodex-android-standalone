@@ -46,6 +46,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.navigation.NavHostController
 import com.canglan.cyancodex.data.ApiClient
+import com.canglan.cyancodex.data.ConvSync
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.data.SettingsBackup
 import com.canglan.cyancodex.ime.CyanCodexImeSettings
@@ -82,6 +83,12 @@ fun SettingsScreen(nav: NavHostController) {
     var bgWatch by remember { mutableStateOf(Session.backgroundWatch) }
     var ignoringBattery by remember { mutableStateOf(isIgnoringBattery(ctx)) }
     var plugins by remember { mutableStateOf(com.canglan.cyancodex.plugin.PluginManager.list()) }
+    // ---- 会话云同步 (2026-10-17) ----
+    // 与「设置云端备份」是**两条独立的路**: 备份只存设置, 对话走这里。
+    var syncOn by remember { mutableStateOf(ConvSync.isEnabled(ctx)) }
+    var syncBusy by remember { mutableStateOf(false) }
+    var syncMsg by remember { mutableStateOf("") }
+    var syncAt by remember { mutableStateOf(ConvSync.lastSyncAt(ctx)) }
     // 调试面板入口可见性。
     //
     // ★★ 2026-10-05 修 bug: 用户原话「我不是说把调试模式关上设置底下的调试就自动隐藏吗」。
@@ -280,6 +287,53 @@ fun SettingsScreen(nav: NavHostController) {
                 }
                 if (AppState.hiddenModules.isNotEmpty()) {
                     TextButton(onClick = { AppState.resetHiddenModules() }) { Text("全部显示") }
+                }
+            }
+
+            // ===== 会话云同步 (2026-10-17) =====
+            SectionCard("云端同步") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("AI 会话云同步", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            "把对话记录同步到服务器，换手机或打开网页版都能接着聊。" +
+                                "与上面的「设置备份」是分开的两件事 —— 备份只存设置，不含对话内容。",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    GlassSwitch(
+                        checked = syncOn,
+                        onCheckedChange = { v ->
+                            syncOn = v
+                            ConvSync.setEnabled(ctx, v)
+                            syncMsg = if (v) "已开启：下次发消息后会自动同步。" else "已关闭：不再上传对话。"
+                        },
+                    )
+                }
+                Text(
+                    if (syncAt <= 0L) "还没同步过"
+                    else "上次同步：" + fmtSyncTime(syncAt) +
+                        ConvSync.lastMessage(ctx).takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    enabled = !syncBusy && syncOn,
+                    onClick = {
+                        syncBusy = true
+                        syncMsg = ""
+                        scope.launch {
+                            val r = ConvSync.sync(ctx)
+                            syncBusy = false
+                            syncAt = ConvSync.lastSyncAt(ctx)
+                            syncMsg = if (r.ok) r.message else "同步失败：" + r.message
+                        }
+                    },
+                ) { Text(if (syncBusy) "同步中…" else "立即同步") }
+                if (syncMsg.isNotBlank()) {
+                    Text(syncMsg, style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary)
                 }
             }
 
@@ -907,6 +961,11 @@ private fun restartApp(ctx: android.content.Context) {
     val comp = launch.component ?: return
     app.startActivity(android.content.Intent.makeRestartActivityTask(comp))
 }
+
+/** 云同步时间戳 → `MM-dd HH:mm`。只用于设置页那行小字，不需要年份。 */
+private fun fmtSyncTime(ts: Long): String =
+    java.text.SimpleDateFormat("MM-dd HH:mm", java.util.Locale.getDefault())
+        .format(java.util.Date(ts))
 
 @Composable
 private fun SectionCard(title: String, content: @Composable ColumnScope.() -> Unit) {

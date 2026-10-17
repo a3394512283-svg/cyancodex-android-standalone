@@ -149,11 +149,12 @@ fun AboutScreen(nav: NavHostController) {
         scope.launch {
             checking = true
             checkMsg = ""
-            val r = safeApi { ApiClient.get().latestUpdate() }
+            // ★ 2026-10-17: 更新检查改走自建服务器（Updater.fetchLatest 内部请求
+            //   cyancodex.bluestudio.cn/api/v1/app/version），不再请求官方 app.blueworkshop.top。
+            val up = Updater.fetchLatest()
             checking = false
-            if (!r.ok) { checkMsg = r.error ?: "检查失败, 请稍后重试"; return@launch }
-            val up = r.data
-            if (up != null && versionNewer(up.version)) {
+            if (up == null) { checkMsg = "检查失败, 请稍后重试"; return@launch }
+            if (versionNewer(up.version)) {
                 updateInfo = up
             } else {
                 checkMsg = "当前已是最新版本 v${BuildConfig.VERSION_NAME}"
@@ -398,7 +399,7 @@ fun AboutScreen(nav: NavHostController) {
                         // ★★ 2026-10-07 修: 共存版不分流的话 —— 白下约 3MB 官方包 →
                         //   install() 的 applicationId 防呆**静默**拒绝(只有 Log.w) →
                         //   回退 openInBrowser 再下一次 → 最后装出**另一个 App**, 本版没变。
-                        "检测到官方新版本 v${up.version}。\n\n" + Updater.COEXIST_UPDATE_HINT
+                        "检测到新版本 v${up.version}。\n\n" + Updater.COEXIST_UPDATE_HINT
                     }
                 )
             },
@@ -413,13 +414,13 @@ fun AboutScreen(nav: NavHostController) {
                     if (!selfUpdate) {
                         // 共存版: 只给"打开下载页" —— 不下载、不安装, 避免上面那条死路
                         TextButton(onClick = {
-                            val url = com.canglan.cyancodex.data.Session.baseUrl.trimEnd('/') + up.url
+                            val url = Updater.absoluteUrl(up.url)
                             updateInfo = null
                             Updater.openInBrowser(ctx, url)
                         }) { Text("打开下载页", color = MaterialTheme.colorScheme.primary) }
                     } else if (progress < 0f) {
                         TextButton(onClick = {
-                            val url = com.canglan.cyancodex.data.Session.baseUrl.trimEnd('/') + up.url
+                            val url = Updater.absoluteUrl(up.url)
                             scope.launch {
                                 val file = Updater.download(ctx, url) { done, total ->
                                     progress = if (total > 0) done.toFloat() / total else -2f
