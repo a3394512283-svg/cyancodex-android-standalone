@@ -339,7 +339,10 @@ object SettingsBackup {
         ed.commit()   // 用 commit: 恢复后马上重启, 必须确保已落盘
 
         val meta = sp.edit()
-        meta.putLong(K_LAST_TIME, System.currentTimeMillis())
+        // ★ 2026-10-17 修: 这里原来存的是 System.currentTimeMillis()（毫秒），
+        //   而云端备份路径与 UI 都按**秒**处理 → 显示成 58762 年。
+        //   统一成秒，与 K_LAST_TIME 的其它写入点保持一致。
+        meta.putLong(K_LAST_TIME, System.currentTimeMillis() / 1000)
         meta.commit()
 
         return RestoreResult(
@@ -557,7 +560,12 @@ object SettingsBackup {
     fun lastCode(ctx: Context): String = prefs(ctx).getString(K_LAST_CODE, "") ?: ""
 
     /** 最近一次备份时间 (秒), 0 = 从未备份 */
-    fun lastTime(ctx: Context): Long = prefs(ctx).getLong(K_LAST_TIME, 0L)
+    fun lastTime(ctx: Context): Long {
+        val t = prefs(ctx).getLong(K_LAST_TIME, 0L)
+        // ★ 兼容历史脏数据: 早期恢复路径存的是毫秒(13 位), UI 按秒 ×1000 会显示成
+        //   公元 58762 年。> 10^10 一律视为毫秒并转成秒（10^10 秒 ≈ 2286 年）。
+        return if (t > 10_000_000_000L) t / 1000 else t
+    }
 
     fun baseUrl(ctx: Context): String {
         val custom = prefs(ctx).getString(K_BASE_OVERRIDE, "") ?: ""
