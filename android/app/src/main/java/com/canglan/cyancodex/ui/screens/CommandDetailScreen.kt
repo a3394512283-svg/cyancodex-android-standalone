@@ -36,6 +36,7 @@ import com.canglan.cyancodex.data.QuickCommand
 import com.canglan.cyancodex.data.Session
 import com.canglan.cyancodex.ui.AppState
 import com.canglan.cyancodex.ui.Routes
+import com.canglan.cyancodex.ui.components.AnimatedLikeIcon
 import com.canglan.cyancodex.ui.components.AppTopBar
 import com.canglan.cyancodex.ui.components.GlassActionButton
 import com.canglan.cyancodex.ui.components.AvatarIcon
@@ -429,9 +430,7 @@ fun CommandDetailScreen(nav: NavHostController, id: Long) {
                             Text(if (fav) "已收藏" else "收藏")
                         }
                         GlassActionButton(onClick = { doLike() }, modifier = Modifier.weight(1f)) {
-                            Icon(if (c.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null,
-                                Modifier.size(16.dp),
-                                tint = if (c.liked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            AnimatedLikeIcon(liked = c.liked, size = 16.dp)
                             Spacer(Modifier.width(4.dp))
                             Text(if (c.liked) "已赞" else "点赞")
                         }
@@ -468,9 +467,7 @@ fun CommandDetailScreen(nav: NavHostController, id: Long) {
                             Text("加入快捷")
                         }
                         GlassActionButton(onClick = { doLike() }, modifier = Modifier.weight(1f)) {
-                            Icon(if (c.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null,
-                                Modifier.size(16.dp),
-                                tint = if (c.liked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
+                            AnimatedLikeIcon(liked = c.liked, size = 16.dp)
                             Spacer(Modifier.width(4.dp))
                             Text(if (c.liked) "已赞" else "点赞")
                         }

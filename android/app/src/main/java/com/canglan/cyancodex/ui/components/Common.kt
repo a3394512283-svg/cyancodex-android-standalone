@@ -7,6 +7,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import android.widget.Toast
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -38,10 +44,13 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -57,6 +66,7 @@ import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.backdrops.layerBackdrop
 import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
@@ -663,6 +673,69 @@ private fun PropBadge(text: String, color: Color) {
     Surface(shape = MaterialTheme.shapes.small, color = color.copy(alpha = 0.18f)) {
         Text(text, color = color, style = MaterialTheme.typography.labelSmall,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+    }
+}
+
+/**
+ * 点赞心形：点赞时弹性 pop（0.55 → 1，spring 过冲）+ 2px 玫瑰色圆环扩散淡出；
+ * 取消时 150ms 回落，无圆环。指令详情页两处点赞共用。
+ */
+@Composable
+fun AnimatedLikeIcon(
+    liked: Boolean,
+    modifier: Modifier = Modifier,
+    size: Dp = 16.dp,
+) {
+    val scale = remember { Animatable(1f) }
+    val ring = remember { Animatable(1f) }   // 1 = 已结束/隐藏
+    val density = LocalDensity.current
+    val basePx = with(density) { size.toPx() }
+
+    LaunchedEffect(liked) {
+        if (liked) {
+            scale.snapTo(0.55f)
+            ring.snapTo(0f)
+            launch {
+                scale.animateTo(
+                    1f,
+                    animationSpec = spring(
+                        dampingRatio = 0.45f,
+                        stiffness = Spring.StiffnessMedium,
+                    ),
+                )
+            }
+            ring.animateTo(1f, animationSpec = tween(550, easing = LinearEasing))
+        } else {
+            scale.animateTo(1f, animationSpec = tween(150))
+            ring.snapTo(1f)
+        }
+    }
+
+    Box(
+        modifier = modifier.size(size * 1.9f),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (ring.value < 1f) {
+            Canvas(Modifier.fillMaxSize()) {
+                val p = ring.value
+                drawCircle(
+                    color = Color(0xFFF43F5E).copy(alpha = (1f - p) * 0.55f),
+                    radius = basePx * 0.5f * (1f + 0.9f * p),
+                    style = Stroke(width = 2.dp.toPx()),
+                )
+            }
+        }
+        Icon(
+            imageVector = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder,
+            contentDescription = if (liked) "已赞" else "点赞",
+            tint = if (liked) Color(0xFFF43F5E) else MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier
+                .size(size)
+                .graphicsLayer {
+                    scaleX = scale.value
+                    scaleY = scale.value
+                },
+        )
     }
 }
 
