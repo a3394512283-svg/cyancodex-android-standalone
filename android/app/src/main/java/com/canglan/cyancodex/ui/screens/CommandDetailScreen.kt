@@ -141,6 +141,35 @@ fun CommandDetailScreen(nav: NavHostController, id: Long) {
                 LoadingBox(Modifier.padding(pad))
             }
         } else {
+            // ★ 2026-10-17 修「点赞闪退」：likeCommand 的返回体一旦字段/泛型对不上，
+            //   `r.data.likeCount` 会在 safeApi 之外抛 ClassCastException（Gson 把 data
+            //   反序列化成 LinkedTreeMap），直接把进程打崩。这里把整段后处理收进
+            //   try/catch，失败只 Toast，不再闪退。
+            fun doLike() {
+                if (AppState.token == null) {
+                    nav.navigate(Routes.LOGIN)
+                    return
+                }
+                scope.launch {
+                    try {
+                        val r = safeApi { ApiClient.get().likeCommand(c.id) }
+                        val d = r.data
+                        if (r.ok && d != null) {
+                            cmd = c.copy(likeCount = d.likeCount, liked = d.liked)
+                        } else {
+                            val rr = safeApi { ApiClient.get().commandDetail(c.id) }
+                            if (rr.ok && rr.data != null) cmd = rr.data
+                        }
+                    } catch (e: Exception) {
+                        com.canglan.cyancodex.data.DebugStore.logE(
+                            "Like", "点赞异常: ${e.javaClass.simpleName}: ${e.message}"
+                        )
+                        android.widget.Toast.makeText(
+                            ctx, "点赞失败，请稍后重试", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                }
+            }
             Column(
                 Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -399,18 +428,7 @@ fun CommandDetailScreen(nav: NavHostController, id: Long) {
                             Spacer(Modifier.width(4.dp))
                             Text(if (fav) "已收藏" else "收藏")
                         }
-                        GlassActionButton(onClick = {
-                            if (AppState.token == null) { nav.navigate(Routes.LOGIN); return@GlassActionButton }
-                            scope.launch {
-                                val r = safeApi { ApiClient.get().likeCommand(c.id) }
-                                if (r.ok && r.data != null) {
-                                    cmd = c.copy(likeCount = r.data.likeCount, liked = r.data.liked)
-                                } else {
-                                    val rr = safeApi { ApiClient.get().commandDetail(c.id) }
-                                    if (rr.ok) cmd = rr.data
-                                }
-                            }
-                        }, modifier = Modifier.weight(1f)) {
+                        GlassActionButton(onClick = { doLike() }, modifier = Modifier.weight(1f)) {
                             Icon(if (c.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null,
                                 Modifier.size(16.dp),
                                 tint = if (c.liked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
@@ -449,19 +467,7 @@ fun CommandDetailScreen(nav: NavHostController, id: Long) {
                             Spacer(Modifier.width(4.dp))
                             Text("加入快捷")
                         }
-                        GlassActionButton(onClick = {
-                            if (AppState.token == null) { nav.navigate(Routes.LOGIN); return@GlassActionButton }
-                            scope.launch {
-                                val r = safeApi { ApiClient.get().likeCommand(c.id) }
-                                if (r.ok && r.data != null) {
-                                    cmd = c.copy(likeCount = r.data.likeCount, liked = r.data.liked)
-                                } else {
-                                    // 失败时重新拉取详情同步状态
-                                    val rr = safeApi { ApiClient.get().commandDetail(c.id) }
-                                    if (rr.ok) cmd = rr.data
-                                }
-                            }
-                        }, modifier = Modifier.weight(1f)) {
+                        GlassActionButton(onClick = { doLike() }, modifier = Modifier.weight(1f)) {
                             Icon(if (c.liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder, null,
                                 Modifier.size(16.dp),
                                 tint = if (c.liked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)

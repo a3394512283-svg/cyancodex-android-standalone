@@ -26,8 +26,8 @@ android {
         //   (原规则是 +0.0.1, 步长太小, 用户要求改大)
         //   versionCode 每次发版 +1, **不再**用 major*10000+minor*100+patch 推导 ——
         //   那个公式在末位涨到 100 时会和 minor+1 撞车 (2.0.100 与 2.1.0 都算 20100)。
-        versionCode = 20004
-        versionName = "2.0.04"
+        versionCode = 20005
+        versionName = "2.0.05"
     }
 
     signingConfigs {
