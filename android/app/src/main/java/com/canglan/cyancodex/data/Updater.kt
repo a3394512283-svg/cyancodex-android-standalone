@@ -104,6 +104,10 @@ object Updater {
                     md5 = o.get("md5")?.asString.orEmpty(),
                     sha256 = o.get("sha256")?.asString.orEmpty(),
                     minVersion = "",
+                    // 更新页的日志卡片要用（服务端已按换行拆成数组）
+                    notes = o.get("notes")?.takeIf { it.isJsonArray }
+                        ?.asJsonArray?.mapNotNull { runCatching { it.asString }.getOrNull() }
+                        ?: emptyList(),
                 )
             }
         } catch (e: Exception) {

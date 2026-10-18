@@ -26,8 +26,8 @@ android {
         //   (原规则是 +0.0.1, 步长太小, 用户要求改大)
         //   versionCode 每次发版 +1, **不再**用 major*10000+minor*100+patch 推导 ——
         //   那个公式在末位涨到 100 时会和 minor+1 撞车 (2.0.100 与 2.1.0 都算 20100)。
-        versionCode = 20006
-        versionName = "2.0.06"
+        versionCode = 20010
+        versionName = "2.0.10"
     }
 
     signingConfigs {
@@ -128,6 +128,11 @@ dependencies {
     // implementation(libs.androidx.compose.material)
     implementation(libs.androidx.compose.ui)
     implementation(libs.androidx.compose.ui.graphics)
+    // ★ 2026-10-18 更新页的下载胶囊用到 AnimatedContent / animateColorAsState,
+    //   这两个在 `androidx.compose.animation:animation` 里。它虽然通常由 foundation
+    //   传递进来, 但传递依赖随时可能被 upstream 改成 implementation —— 显式声明,
+    //   版本仍由 BOM 统一管理。
+    implementation("androidx.compose.animation:animation")
     // ★ 2026-10-17 体积优化: ui-tooling-preview 只在 IDE 预览/调试时需要,
     //   release 包不需要它(全仓没有 @Preview)。从 implementation 降为 debugImplementation。
     debugImplementation(libs.androidx.compose.ui.tooling.preview)

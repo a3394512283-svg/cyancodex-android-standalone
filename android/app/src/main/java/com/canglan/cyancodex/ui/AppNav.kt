@@ -115,6 +115,8 @@ object Routes {
     const val TERMS = "terms"
     const val OPEN_SOURCE = "open_source"
     const val CHANGELOG = "changelog"
+    // 2026-10-18: App 更新改成独立整屏页面（原来是 AlertDialog），入口在「关于」页
+    const val UPDATE = "update"
     const val GOMOKU = "gomoku"
     const val SCHOOL_SHARE = "school_share"
     const val AD_REWARD = "ad_reward"
@@ -630,6 +632,7 @@ fun AppNav() {
             composable(Routes.TERMS) { TermsScreen(navController) }
             composable(Routes.OPEN_SOURCE) { OpenSourceScreen(navController) }
             composable(Routes.CHANGELOG) { ChangelogScreen(navController) }
+            composable(Routes.UPDATE) { UpdateScreen(navController) }
             composable(Routes.GOMOKU) { GomokuScreen(navController) }
             composable(Routes.SCHOOL_SHARE) { SchoolShareScreen(navController) }
             composable(Routes.AD_REWARD) { AdRewardScreen(navController) }

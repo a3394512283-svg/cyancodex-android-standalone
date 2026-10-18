@@ -92,15 +92,7 @@ fun QqGroupCard(modifier: Modifier = Modifier) {
 fun AboutScreen(nav: NavHostController) {
     val scope = rememberCoroutineScope()
     val ctx = LocalContext.current
-    var checking by remember { mutableStateOf(false) }
-    var updateInfo by remember { mutableStateOf<com.canglan.cyancodex.data.UpdateInfo?>(null) }
-    var checkMsg by remember { mutableStateOf("") }
     var showLicenseDialog by remember { mutableStateOf(false) }
-
-    // ★★ 2026-10-07: 本版能否走「下载官方包并安装」的自更新通道。
-    //   共存版为 false —— 判据下沉在 Updater.canSelfUpdate() 里, 不在这里直接判
-    //   isCoexistBuild, 因为"下载并安装"入口共 3 个, 各判各的必然漏。
-    val selfUpdate = remember { Updater.canSelfUpdate(ctx) }
 
     // ===== 隐藏调试模式：连点版本号 7 次解锁 =====
     // 已解锁后再点 → 直接进调试面板（不用再点 7 次）
@@ -145,21 +137,10 @@ fun AboutScreen(nav: NavHostController) {
     }
 
     fun checkUpdate() {
-        if (checking) return
-        scope.launch {
-            checking = true
-            checkMsg = ""
-            // ★ 2026-10-17: 更新检查改走自建服务器（Updater.fetchLatest 内部请求
-            //   cyancodex.bluestudio.cn/api/v1/app/version），不再请求官方 app.blueworkshop.top。
-            val up = Updater.fetchLatest()
-            checking = false
-            if (up == null) { checkMsg = "检查失败, 请稍后重试"; return@launch }
-            if (versionNewer(up.version)) {
-                updateInfo = up
-            } else {
-                checkMsg = "当前已是最新版本 v${BuildConfig.VERSION_NAME}"
-            }
-        }
+        // ★ 2026-10-18: 更新从 AlertDialog 改成**独立的整屏页面**（Routes.UPDATE）。
+        //   原对话框只能显示一行「下载中 42%」，弱网下体验很差；页面里有真实的
+        //   字节进度、版本卡与分块更新日志，观感对齐 OriginOS 的「系统升级」。
+        nav.navigate(Routes.UPDATE)
     }
 
     Scaffold(
@@ -221,19 +202,10 @@ fun AboutScreen(nav: NavHostController) {
             Spacer(Modifier.height(4.dp))
             Text("由 沧蓝工坊工作室 开发", style = MaterialTheme.typography.titleSmall)
             Spacer(Modifier.height(10.dp))
-            GlassActionButton(onClick = { checkUpdate() }, enabled = !checking, modifier = Modifier.fillMaxWidth()) {
-                if (checking) {
-                    CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                } else {
-                    Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
-                }
+            GlassActionButton(onClick = { checkUpdate() }, modifier = Modifier.fillMaxWidth()) {
+                Icon(Icons.Default.Refresh, null, Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text(if (checking) "检查中…" else "检查更新")
-            }
-            if (checkMsg.isNotBlank()) {
-                Text(checkMsg, style = MaterialTheme.typography.labelMedium,
-                    color = if (checkMsg.startsWith("当前")) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(top = 6.dp))
+                Text("检查更新")
             }
             Spacer(Modifier.height(16.dp))
             QqGroupCard()
@@ -382,59 +354,5 @@ fun AboutScreen(nav: NavHostController) {
         )
     }
 
-    // 发现新版本弹窗
-    updateInfo?.let { up ->
-        var progress by remember { mutableStateOf(-1f) }   // -1=未下载, 0..1=进度, -2=未知大小
-        LaunchedEffect(up.url) { progress = -1f }
-        AlertDialog(
-            onDismissRequest = { updateInfo = null },
-            title = {
-                Text(if (selfUpdate) "发现新版本 v${up.version}" else "上游发布新版本 v${up.version}")
-            },
-            text = {
-                Text(
-                    if (selfUpdate) {
-                        "最新版本 v${up.version} 已发布，点击「下载安装」一键更新。"
-                    } else {
-                        // ★★ 2026-10-07 修: 共存版不分流的话 —— 白下约 3MB 官方包 →
-                        //   install() 的 applicationId 防呆**静默**拒绝(只有 Log.w) →
-                        //   回退 openInBrowser 再下一次 → 最后装出**另一个 App**, 本版没变。
-                        "检测到新版本 v${up.version}。\n\n" + Updater.COEXIST_UPDATE_HINT
-                    }
-                )
-            },
-            confirmButton = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (selfUpdate && progress >= 0f) {
-                        Text(if (progress == -2f) "下载中…" else "下载中 ${(progress * 100).toInt()}%",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary)
-                    }
-                    TextButton(onClick = { updateInfo = null }) { Text("知道了") }
-                    if (!selfUpdate) {
-                        // 共存版: 只给"打开下载页" —— 不下载、不安装, 避免上面那条死路
-                        TextButton(onClick = {
-                            val url = Updater.absoluteUrl(up.url)
-                            updateInfo = null
-                            Updater.openInBrowser(ctx, url)
-                        }) { Text("打开下载页", color = MaterialTheme.colorScheme.primary) }
-                    } else if (progress < 0f) {
-                        TextButton(onClick = {
-                            val url = Updater.absoluteUrl(up.url)
-                            scope.launch {
-                                val file = Updater.download(ctx, url) { done, total ->
-                                    progress = if (total > 0) done.toFloat() / total else -2f
-                                }
-                                updateInfo = null
-                                if (file == null || !Updater.install(ctx, file)) {
-                                    checkMsg = "下载失败，已尝试用浏览器打开下载页面"
-                                    Updater.openInBrowser(ctx, url)
-                                }
-                            }
-                        }) { Text("下载安装", color = MaterialTheme.colorScheme.primary) }
-                    }
-                }
-            },
-        )
-    }
+    // 发现新版本的弹窗已移除：更新改走独立整屏页面 Routes.UPDATE（见 UpdateScreen.kt）
 }

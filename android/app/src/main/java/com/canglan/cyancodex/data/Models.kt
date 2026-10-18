@@ -747,6 +747,9 @@ data class UpdateInfo(
     val md5: String = "",
     @SerializedName("sha256") val sha256: String = "",
     @SerializedName("min_version") val minVersion: String = "",
+    // 2026-10-18: 服务端 /api/v1/app/version 会下发 notes 数组（换行拆好的更新说明），
+    // 更新页要按「标题：正文」分块展示，所以这里一并带上来。
+    val notes: List<String> = emptyList(),
 )
 
 data class LikeResp(
